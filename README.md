@@ -1,21 +1,26 @@
-# STUDY-21-001175 — Statistical Analysis (CTR)
+# STUDY-21-001175 — Colchicine CTR Statistical Outputs
 
-Public companion page for the Colchicine pilot trial CTR submission.
+Public companion site for the Colchicine pilot trial CTR submission.
 
-## Live page
+## Live pages
 
-https://alexanderb95-jpg.github.io/colchicine-ctr-stats/
+| Page | URL |
+|------|-----|
+| **Full trial outputs (tables + figures)** | https://alexanderb95-jpg.github.io/colchicine-ctr-stats/ |
+| **Statistical code summary** | https://alexanderb95-jpg.github.io/colchicine-ctr-stats/statistical-analysis.html |
+| **R script (download)** | https://github.com/alexanderb95-jpg/colchicine-ctr-stats/blob/main/colchicine_ctr_statistical_code.R |
 
 ## Contents
 
-- `index.html` — primary endpoint output and annotated R code
+- `index.html` — PI-verified outcomes report (tables 1–15, figures 1–4, primary/exploratory results)
+- `statistical-analysis.html` — annotated R code and primary test output summary
 - `colchicine_ctr_statistical_code.R` — downloadable R script
 
 ## Trial context
 
 - Protocol STUDY-21-001175 (IND 156493), v3.0 (22 May 2023)
+- NCT05279690
 - Cohort 1 low dose: colchicine 0.6 mg orally twice daily × 14 days
-- Primary endpoint: maximum percent CRP decline from cycle 1 day 1 to lowest on-treatment value at cycle 1 day 8 or 15
 - Data cut: 23 May 2026
 
-No patient-level data are included in this repository.
+No patient-level export data are included in this repository.

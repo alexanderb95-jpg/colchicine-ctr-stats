@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>STUDY-21-001175 — Statistical Analysis</title>
+<style>
+body { font-family: Georgia, "Times New Roman", serif; margin: 2rem; line-height: 1.45; color: #111; }
+h1, h2 { font-family: Arial, sans-serif; }
+a { color: #0b57d0; }
+pre { background: #f6f8fa; border: 1px solid #d9e2f3; padding: 1rem; overflow-x: auto; font-size: 13px; }
+table { border-collapse: collapse; margin: 1rem 0; width: auto; }
+th, td { border: 1px solid #cbd5e1; padding: 0.45rem 0.65rem; text-align: left; vertical-align: top; }
+th { background: #d9e2f3; }
+tr:nth-child(even) td { background: #f2f6fa; }
+.meta { color: #444; font-size: 0.95rem; }
+</style>
+</head>
+<body>
+<h1>Statistical Analysis — STUDY-21-001175</h1>
+<p class="meta">Colchicine pilot trial (Cohort 1 low dose). Protocol v3.0 (22 May 2023). Data cut: 23 May 2026.</p>
+<p>Companion files: <a href="statistical-analysis.html">Statistical code summary</a> · <a href="colchicine_ctr_statistical_code.R">colchicine_ctr_statistical_code.R</a> · <a href="./">Full trial outputs</a></p>
+
+<h2>Primary endpoint output</h2>
+<table>
+<tr><th>Analysis</th><th>Result</th></tr>
+<tr><td>Population</td><td>N = 8 evaluable for primary CRP endpoint (Cohort 1 low dose)</td></tr>
+<tr><td>Mean maximum CRP decline</td><td>22.6% (SD 32.9%)</td></tr>
+<tr><td>One-sided one-sample t-test vs 0</td><td>t = 1.94, p = 0.047</td></tr>
+<tr><td>Prespecified alpha</td><td>0.025 (not met)</td></tr>
+<tr><td>Post-hoc power (N = 8, observed effect)</td><td>39% at alpha = 0.025</td></tr>
+</table>
+
+<h2>Exploratory endpoints</h2>
+<p>Progression-free survival and overall survival used Kaplan–Meier methods (exploratory; not powered). PFS: 5 events among 11; OS: 4 events among 11; medians not estimable.</p>
+
+<h2>Statistical code (R)</h2>
+<pre><code># STUDY-21-001175 — prespecified and exploratory analyses (R 4.x)
+# Data cut: ProtocolNo2101175PRM_DATA_2026-05-18_2135.csv
+# Cohort 1 low dose only (colchicine 0.6 mg oral BID x 14 days)
+
+library(dplyr)
+library(survival)
+
+dat &lt;- read.csv(&quot;ProtocolNo2101175PRM_DATA_2026-05-18_2135.csv&quot;)
+
+# --- Primary endpoint: max % CRP decline from C1D1 during C1 on-treatment visits ---
+crp_c1 &lt;- dat %&gt;%
+  filter(redcap_event_name %in% c(&quot;cycle_1_day_1_arm_1&quot;, &quot;cycle_1_day_8_arm_1&quot;, &quot;cycle_1_day_15_arm_1&quot;)) %&gt;%
+  select(study_id, redcap_event_name, c_reactive_protein_mg_l) %&gt;%
+  tidyr::pivot_wider(names_from = redcap_event_name, values_from = c_reactive_protein_mg_l)
+
+crp_eval &lt;- crp_c1 %&gt;%
+  mutate(
+    baseline_crp = cycle_1_day_1_arm_1,
+    post_min_crp = pmin(cycle_1_day_8_arm_1, cycle_1_day_15_arm_1, na.rm = TRUE),
+    max_crp_decline_pct = 100 * (baseline_crp - post_min_crp) / baseline_crp
+  ) %&gt;%
+  filter(!is.na(max_crp_decline_pct), is.finite(max_crp_decline_pct))
+
+# Prespecified one-sided one-sample t-test (H0: mean decline = 0), alpha = 0.025
+primary_test &lt;- t.test(crp_eval$max_crp_decline_pct, mu = 0, alternative = &quot;greater&quot;)
+primary_test  # mean 22.6%, SD 32.9%, t = 1.94, p = 0.047 (N = 8 evaluable)
+
+# --- Exploratory Kaplan-Meier PFS/OS (not powered) ---
+# PFS event: RECIST PD or discontinuation for progression
+# OS event: death from any cause
+
+pfs_os &lt;- dat %&gt;%
+  group_by(study_id) %&gt;%
+  summarise(
+    pfs_time_months = first(pfs_months),
+    pfs_event = first(as.integer(pfs_event_flag)),
+    os_time_months = first(os_months),
+    os_event = first(as.integer(os_event_flag)),
+    .groups = &quot;drop&quot;
+  )
+
+fit_pfs &lt;- survfit(Surv(pfs_time_months, pfs_event) ~ 1, data = pfs_os)
+fit_os  &lt;- survfit(Surv(os_time_months, os_event) ~ 1, data = pfs_os)
+summary(fit_pfs)
+summary(fit_os)
+
+# Post-hoc power for observed primary effect (N = 8, alpha = 0.025 one-sided)
+pwr::power.t.test(n = 8, delta = 22.6 / 32.9, sd = 1, sig.level = 0.025, type = &quot;one.sample&quot;, alternative = &quot;one.sided&quot;)
+</code></pre>
+</body>
+</html>
