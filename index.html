@@ -5289,4 +5289,78 @@ $(document).ready(function ()  {
 
 
 
+
+<div id="statistical-code-appendix" class="section level2" style="margin-top: 3rem; padding-top: 1.5rem; border-top: 2px solid #dee2e6;">
+<div name="Statistical_Code" data-unique="Statistical_Code"></div>
+<h2>Statistical Code (R)</h2>
+<p>Prespecified and exploratory analyses per protocol v3.0 Section 12. Downloadable script: <a href="colchicine_ctr_statistical_code.R">colchicine_ctr_statistical_code.R</a></p>
+
+<h3>Primary endpoint output</h3>
+<table class="table table-striped table-hover" style="width: auto !important; margin-left: auto; margin-right: auto;">
+<thead><tr><th>Analysis</th><th>Result</th></tr></thead>
+<tbody>
+<tr><td>Population</td><td>N = 8 evaluable for primary CRP endpoint (Cohort 1 low dose)</td></tr>
+<tr><td>Mean maximum CRP decline</td><td>22.6% (SD 32.9%)</td></tr>
+<tr><td>One-sided one-sample t-test vs 0</td><td>t = 1.94, p = 0.047</td></tr>
+<tr><td>Prespecified alpha</td><td>0.025 (not met)</td></tr>
+<tr><td>Post-hoc power (N = 8, observed effect)</td><td>39% at alpha = 0.025</td></tr>
+</tbody>
+</table>
+
+<h3>Exploratory endpoints</h3>
+<p>Progression-free survival and overall survival used Kaplan–Meier methods (exploratory; not powered). PFS: 5 events among 11; OS: 4 events among 11; medians not estimable.</p>
+
+<h3>Annotated R code</h3>
+<pre style="background:#f6f8fa;border:1px solid #d9e2f3;padding:1rem;overflow-x:auto;font-size:13px;"><code># STUDY-21-001175 — prespecified and exploratory analyses (R 4.x)
+# Data cut: ProtocolNo2101175PRM_DATA_2026-05-18_2135.csv
+# Cohort 1 low dose only (colchicine 0.6 mg oral BID x 14 days)
+
+library(dplyr)
+library(survival)
+
+dat &lt;- read.csv(&quot;ProtocolNo2101175PRM_DATA_2026-05-18_2135.csv&quot;)
+
+# --- Primary endpoint: max % CRP decline from C1D1 during C1 on-treatment visits ---
+crp_c1 &lt;- dat %&gt;%
+  filter(redcap_event_name %in% c(&quot;cycle_1_day_1_arm_1&quot;, &quot;cycle_1_day_8_arm_1&quot;, &quot;cycle_1_day_15_arm_1&quot;)) %&gt;%
+  select(study_id, redcap_event_name, c_reactive_protein_mg_l) %&gt;%
+  tidyr::pivot_wider(names_from = redcap_event_name, values_from = c_reactive_protein_mg_l)
+
+crp_eval &lt;- crp_c1 %&gt;%
+  mutate(
+    baseline_crp = cycle_1_day_1_arm_1,
+    post_min_crp = pmin(cycle_1_day_8_arm_1, cycle_1_day_15_arm_1, na.rm = TRUE),
+    max_crp_decline_pct = 100 * (baseline_crp - post_min_crp) / baseline_crp
+  ) %&gt;%
+  filter(!is.na(max_crp_decline_pct), is.finite(max_crp_decline_pct))
+
+# Prespecified one-sided one-sample t-test (H0: mean decline = 0), alpha = 0.025
+primary_test &lt;- t.test(crp_eval$max_crp_decline_pct, mu = 0, alternative = &quot;greater&quot;)
+primary_test  # mean 22.6%, SD 32.9%, t = 1.94, p = 0.047 (N = 8 evaluable)
+
+# --- Exploratory Kaplan-Meier PFS/OS (not powered) ---
+# PFS event: RECIST PD or discontinuation for progression
+# OS event: death from any cause
+
+pfs_os &lt;- dat %&gt;%
+  group_by(study_id) %&gt;%
+  summarise(
+    pfs_time_months = first(pfs_months),
+    pfs_event = first(as.integer(pfs_event_flag)),
+    os_time_months = first(os_months),
+    os_event = first(as.integer(os_event_flag)),
+    .groups = &quot;drop&quot;
+  )
+
+fit_pfs &lt;- survfit(Surv(pfs_time_months, pfs_event) ~ 1, data = pfs_os)
+fit_os  &lt;- survfit(Surv(os_time_months, os_event) ~ 1, data = pfs_os)
+summary(fit_pfs)
+summary(fit_os)
+
+# Post-hoc power for observed primary effect (N = 8, alpha = 0.025 one-sided)
+pwr::power.t.test(n = 8, delta = 22.6 / 32.9, sd = 1, sig.level = 0.025, type = &quot;one.sample&quot;, alternative = &quot;one.sided&quot;)
+</code></pre>
+</div>
+<!-- end statistical-code-appendix -->
+
 </body></html>
