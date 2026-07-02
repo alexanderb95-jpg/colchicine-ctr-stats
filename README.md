@@ -8,13 +8,16 @@ Public companion site for the Colchicine pilot trial CTR submission.
 |------|-----|
 | **Full trial outputs (tables + figures)** | https://alexanderb95-jpg.github.io/colchicine-ctr-stats/ |
 | **Statistical code summary** | https://alexanderb95-jpg.github.io/colchicine-ctr-stats/statistical-analysis.html |
-| **R script (download)** | https://github.com/alexanderb95-jpg/colchicine-ctr-stats/blob/main/colchicine_ctr_statistical_code.R |
+| **R script (download, full code)** | https://github.com/alexanderb95-jpg/colchicine-ctr-stats/blob/main/colchicine_ctr_statistical_code.R |
+| **Source R Markdown** | https://github.com/alexanderb95-jpg/colchicine-ctr-stats/blob/main/CTR_Submission_Results_Protocol2101175.Rmd |
 
-## Contents
+## Repository contents
 
-- `index.html` — PI-verified outcomes report (tables 1–15, figures 1–4, primary/exploratory results)
-- `statistical-analysis.html` — annotated R code and primary test output summary
-- `colchicine_ctr_statistical_code.R` — downloadable R script
+- `index.html` — PI-verified outcomes report + complete statistical code appendix at bottom
+- `CTR_Submission_Results_Protocol2101175.Rmd` — source R Markdown for all tables/figures
+- `protocol2101175_redcap_helpers.R` — REDCap helper functions (screen failure, survival, CTCAE labels)
+- `colchicine_ctr_statistical_code.R` — concatenated helpers + all R chunks (~1,660 lines)
+- `scripts/extract_stats_code.py` — rebuild `colchicine_ctr_statistical_code.R` from the Rmd
 
 ## Trial context
 
@@ -24,3 +27,12 @@ Public companion site for the Colchicine pilot trial CTR submission.
 - Data cut: 23 May 2026
 
 No patient-level export data are included in this repository.
+
+## Rebuild statistical code file
+
+```bash
+python3 scripts/extract_stats_code.py
+git add colchicine_ctr_statistical_code.R index.html statistical-analysis.html
+git commit -m "chore: refresh extracted statistical code"
+git push
+```

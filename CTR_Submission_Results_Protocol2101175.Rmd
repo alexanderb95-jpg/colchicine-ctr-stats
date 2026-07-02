@@ -1,517 +1,19 @@
-# STUDY-21-001175 — full statistical analysis code (extracted from CTR R Markdown)
-# Source: CTR_Submission_Results_Protocol2101175.Rmd
-# Data: ProtocolNo2101175PRM_DATA_2026-05-18_2135.csv
-# Helpers: protocol2101175_redcap_helpers.R
+---
+title: "Colchicine to Suppress Pro-Tumorigenic Inflammation in Advanced Solid Tumors and Resected High-Risk Urothelial Carcinoma: A Pilot Trial"
+subtitle: "Clinical Trial Results (The Oncologist CTR format)"
+author: "Alexander B. Karol; Che-Kai Tsao, MD; Himanshu Joshi, PhD; Deborah Y. Doroshow, MD, PhD; Matthew D. Galsky, MD; Thomas Marron, MD, PhD"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    toc_float: true
+    number_sections: false
+    theme: flatly
+    df_print: paged
+---
 
-# =============================================================================
-# protocol2101175_redcap_helpers.R
-# =============================================================================
-# Helpers for Protocol 2101175 REDCap CTR report (labels, therapy class, tumor type).
-
-#' Load CTCAE v5 term labels from REDCap companion .r export
-load_ctcae_term_labels <- function(path = here::here("ProtocolNo2101175PRM_R_2026-05-18_2135.r")) {
-  lines <- readLines(path, encoding = "UTF-8", warn = FALSE)
-  if (length(lines) > 0 && startsWith(lines[[1]], "\ufeff")) {
-    lines[[1]] <- sub("^\ufeff", "", lines[[1]])
-  }
-  start_ln <- which(grepl("^mapping_ae_term_ctcaev5\\s*=\\s*c\\(", lines))[1]
-  end_ln <- which(grepl("^mapping_meddra_soc\\s*=\\s*c\\(", lines))[1] - 1
-  if (is.na(start_ln) || is.na(end_ln)) {
-    stop("Could not locate mapping_ae_term_ctcaev5 in ", path, call. = FALSE)
-  }
-
-  # Line-parse (companion file has a few non-standard keys that break source()).
-  terms <- character()
-  for (ln in lines[start_ln:end_ln]) {
-    m <- regexec(
-      '^[[:space:]]*"([^"]+)"[[:space:]]*=[[:space:]]*"([^"]*)"',
-      ln,
-      perl = TRUE
-    )
-    if (length(m) < 1L || m[[1]][[1L]] < 0L) next
-    caps <- regmatches(ln, m)[[1]]
-    if (length(caps) < 3 || is.na(caps[[3]])) next
-    code <- caps[[2]]
-    raw_val <- as.character(caps[[3]])
-    if (!nzchar(raw_val)) next
-    term <- trimws(strsplit(raw_val, "\t", fixed = TRUE)[[1]][1])
-    if (!nzchar(term)) next
-    terms[code] <- term
-  }
-  terms
-}
-
-#' Map one CTCAE code (numeric or character) to preferred term
-ctcae_term_label <- function(code, term_map) {
-  if (length(code) == 0) return(character(0))
-  key <- as.character(code)
-  out <- unname(term_map[key])
-  miss <- is.na(out) & !is.na(code) & key != ""
-  if (any(miss)) {
-    out[miss] <- paste0("CTCAE code ", key[miss])
-  }
-  out
-}
-
-#' Extract screening laboratory values for a subject (first non-missing on screening visits).
-protocol2101175_screening_labs <- function(dat, subject_id) {
-  screening_events <- c("screening_28_days_arm_1", "screening_arm_2", "screening_arm_3")
-  lab_cols <- c(
-    "hemoglobin_g_dl", "creatinine_mg_dl", "ast_u_l", "alt_u_l",
-    "bilirubin_total_mg_dl", "neutrophils", "c_reactive_protein_value"
-  )
-
-  screen_rows <- dat %>%
-    dplyr::filter(
-      .data$study_id == .env$subject_id,
-      .data$redcap_event_name %in% screening_events
-    )
-
-  primary_row <- screen_rows %>%
-    dplyr::filter(is.na(.data$redcap_repeat_instrument) | .data$redcap_repeat_instrument == "") %>%
-    dplyr::slice(1)
-
-  source_rows <- if (nrow(primary_row) > 0) primary_row else screen_rows %>% dplyr::slice(1)
-  if (nrow(source_rows) == 0) {
-    return(tibble::tibble())
-  }
-
-  source_rows %>%
-    dplyr::select(dplyr::any_of(lab_cols)) %>%
-    tidyr::pivot_longer(dplyr::everything(), names_to = "lab", values_to = "value") %>%
-    dplyr::mutate(value = suppressWarnings(as.numeric(.data$value))) %>%
-    dplyr::filter(!is.na(.data$value)) %>%
-    dplyr::group_by(.data$lab) %>%
-    dplyr::summarise(value = .data$value[[1]], .groups = "drop") %>%
-    tidyr::pivot_wider(names_from = .data$lab, values_from = .data$value)
-}
-
-#' Identify organ-function values that fail protocol inclusion thresholds.
-protocol2101175_organ_function_failures <- function(labs) {
-  if (nrow(labs) == 0) return(character())
-
-  fails <- character()
-  if ("hemoglobin_g_dl" %in% names(labs) && !is.na(labs$hemoglobin_g_dl) && labs$hemoglobin_g_dl < 8) {
-    fails <- c(fails, paste0("hemoglobin ", labs$hemoglobin_g_dl, " g/dL (required >=8 g/dL)"))
-  }
-  if ("neutrophils" %in% names(labs) && !is.na(labs$neutrophils) && labs$neutrophils < 1.5) {
-    fails <- c(fails, paste0("ANC ", labs$neutrophils, " x10^3/uL (required >=1.5 x10^3/uL)"))
-  }
-  if ("creatinine_mg_dl" %in% names(labs) && !is.na(labs$creatinine_mg_dl) && labs$creatinine_mg_dl > 1.5) {
-    fails <- c(fails, paste0("creatinine ", labs$creatinine_mg_dl, " mg/dL (required <=1.5 mg/dL)"))
-  }
-  fails
-}
-
-#' Build publication-ready screen-failure reason/detail from REDCap screening row.
-protocol2101175_screen_fail_labels <- function(row, labs = NULL) {
-  reason_labels <- c(
-    reason_for_screen_fail___1 = "Inclusion criteria",
-    reason_for_screen_fail___2 = "Exclusion criteria",
-    reason_for_screen_fail___3 = "Surpassed screening window",
-    reason_for_screen_fail___4 = "Physician decision to discontinue",
-    reason_for_screen_fail___5 = "Patient decision to discontinue",
-    reason_for_screen_fail___6 = "Other"
-  )
-
-  inc_fail_labels <- c(
-    "4" = "CRP below inclusion threshold",
-    "8" = "Inadequate organ function"
-  )
-
-  exc_labels <- c(
-    "1" = "Long-term colchicine use",
-    "2" = "Active infection requiring systemic therapy",
-    "3" = "Pregnant or breastfeeding",
-    "4" = "Prior cancer treatment within 30 days / 5 half-lives",
-    "5" = "Prior/concurrent malignancy interfering with assessment",
-    "6" = "Active CNS metastases",
-    "7" = "Investigational drug within 30 days",
-    "8" = "Prohibited concomitant medications",
-    "9" = "RA/vasculitis/SLE requiring active treatment",
-    "10" = "Recent MI or NYHA class III+ heart failure"
-  )
-
-  checked_nums <- function(prefix) {
-    cols <- grep(paste0("^", prefix, "___[0-9]+$"), names(row), value = TRUE)
-    hit <- cols[!is.na(row[cols]) & row[cols] == 1]
-    gsub(paste0(prefix, "___"), "", hit)
-  }
-
-  redcap_reason <- {
-    hit <- names(reason_labels)[vapply(
-      names(reason_labels),
-      function(nm) !is.na(row[[nm]]) && row[[nm]] == 1,
-      logical(1)
-    )]
-    if (length(hit) == 0) NA_character_ else paste(unname(reason_labels[hit]), collapse = "; ")
-  }
-
-  inc_nums <- checked_nums("inclusion_criteria_causing")
-  exc_nums <- checked_nums("exclusion_criteria_causing")
-  other <- row$if_other_please_mention_de[[1]]
-
-  detail_parts <- character()
-  clinical_reason <- NA_character_
-
-  if ("8" %in% inc_nums) {
-    clinical_reason <- "Inadequate organ function"
-    organ_fails <- if (!is.null(labs)) protocol2101175_organ_function_failures(labs) else character()
-    if (length(organ_fails) > 0) {
-      detail_parts <- c(
-        detail_parts,
-        paste0(
-          "Did not meet inclusion organ-function criteria; ",
-          paste(organ_fails, collapse = "; ")
-        )
-      )
-    } else {
-      detail_parts <- c(
-        detail_parts,
-        "Did not meet inclusion organ-function criteria (specific abnormal value not available in export)"
-      )
-    }
-  }
-
-  if ("4" %in% inc_nums) {
-    clinical_reason <- "CRP below inclusion threshold"
-    crp_val <- if (!is.null(labs) && "c_reactive_protein_value" %in% names(labs)) {
-      labs$c_reactive_protein_value
-    } else {
-      NA_real_
-    }
-    detail_parts <- c(
-      detail_parts,
-      if (!is.na(crp_val)) {
-        paste0("CRP ", crp_val, " mg/L (required >5 mg/L)")
-      } else {
-        "Did not meet inclusion CRP criterion (CRP >5 mg/L)"
-      }
-    )
-  }
-
-  other_inc <- setdiff(inc_nums, c("4", "8"))
-  if (length(other_inc) > 0) {
-    if (is.na(clinical_reason)) clinical_reason <- "Did not meet inclusion criteria"
-    detail_parts <- c(
-      detail_parts,
-      paste0("Additional inclusion criterion not met (REDCap code ", paste(other_inc, collapse = ", "), ")")
-    )
-  }
-
-  if (length(exc_nums) > 0) {
-    if (is.na(clinical_reason)) {
-      clinical_reason <- "Met exclusion criteria"
-    }
-    detail_parts <- c(
-      detail_parts,
-      paste0(
-        "Met exclusion criterion: ",
-        paste(unname(exc_labels[exc_nums]), collapse = "; ")
-      )
-    )
-  }
-
-  if (!is.na(other) && nzchar(other)) {
-    if (is.na(clinical_reason)) clinical_reason <- "Other"
-    detail_parts <- c(detail_parts, other)
-  }
-
-  if (is.na(clinical_reason)) {
-    clinical_reason <- redcap_reason
-  }
-
-  if (length(detail_parts) == 0) {
-    detail_parts <- if (!is.na(redcap_reason)) {
-      paste0("REDCap screen-fail category: ", redcap_reason)
-    } else {
-      NA_character_
-    }
-  }
-
-  list(
-    screen_fail_reason_redcap = redcap_reason,
-    screen_fail_reason = clinical_reason,
-    screen_fail_detail = paste(detail_parts, collapse = "; ")
-  )
-}
-
-#' Build accrual disposition (consent, enrollment, screen-fail) from screening visits.
-build_protocol2101175_screen_disposition <- function(dat) {
-  screening_events <- c("screening_28_days_arm_1", "screening_arm_2", "screening_arm_3")
-
-  consent <- dat %>%
-    dplyr::filter(!is.na(.data$date_informed_consent_sign)) %>%
-    dplyr::group_by(.data$study_id) %>%
-    dplyr::summarise(
-      consent_date = min(.data$date_informed_consent_sign, na.rm = TRUE),
-      .groups = "drop"
-    )
-
-  disp_rows <- dat %>%
-    dplyr::filter(
-      .data$redcap_event_name %in% screening_events,
-      !is.na(.data$was_the_subject_enrolled)
-    ) %>%
-    dplyr::group_by(.data$study_id) %>%
-    dplyr::slice(1) %>%
-    dplyr::ungroup()
-
-  if (nrow(disp_rows) == 0) {
-    stop("No screening disposition rows with was_the_subject_enrolled found.", call. = FALSE)
-  }
-
-  label_mat <- lapply(seq_len(nrow(disp_rows)), function(i) {
-    row <- disp_rows[i, , drop = FALSE]
-    sid <- row$study_id[[1]]
-    labs <- protocol2101175_screening_labs(dat, sid)
-    protocol2101175_screen_fail_labels(row, labs)
-  })
-
-  consent %>%
-    dplyr::left_join(
-      disp_rows %>%
-        dplyr::transmute(
-          study_id = .data$study_id,
-          enrolled_flag = .data$was_the_subject_enrolled,
-          enroll_date = .data$date_of_enrollment
-        ),
-      by = "study_id"
-    ) %>%
-    dplyr::mutate(
-      screen_fail_reason_redcap = vapply(label_mat, `[[`, character(1), "screen_fail_reason_redcap"),
-      screen_fail_reason = vapply(label_mat, `[[`, character(1), "screen_fail_reason"),
-      screen_fail_detail = vapply(label_mat, `[[`, character(1), "screen_fail_detail"),
-      enrolled = .data$enrolled_flag == 1,
-      screen_fail = .data$enrolled_flag == 0,
-      disposition = dplyr::case_when(
-        .data$enrolled ~ "Enrolled",
-        .data$screen_fail ~ "Screen failure",
-        TRUE ~ "Unknown"
-      )
-    ) %>%
-    dplyr::arrange(.data$study_id)
-}
-
-#' Summarize screen-failure reasons for accrual table
-summarise_screen_fail_reasons <- function(disposition) {
-  sf <- disposition %>% dplyr::filter(.data$screen_fail)
-  if (nrow(sf) == 0) {
-    return(tibble::tibble(
-      `Screen-failure reason` = character(),
-      `N` = integer(),
-      `Details` = character()
-    ))
-  }
-
-  sf %>%
-    dplyr::group_by(.data$screen_fail_reason) %>%
-    dplyr::summarise(
-      `N` = dplyr::n(),
-      `Details` = paste(unique(stats::na.omit(.data$screen_fail_detail)), collapse = " | "),
-      .groups = "drop"
-    ) %>%
-    dplyr::rename(`Screen-failure reason` = .data$screen_fail_reason) %>%
-    dplyr::arrange(dplyr::desc(.data$`N`))
-}
-
-#' Classify a prior-therapy row into a publication-friendly class
-classify_prior_therapy <- function(therapy_name) {
-  t <- tolower(trimws(therapy_name))
-  dplyr::case_when(
-    is.na(t) | t == "" ~ NA_character_,
-    stringr::str_detect(t, "radiotherapy|^rt |^xrt|sbrt|rx dose|neoadjuvant rt|adjuvant rt") ~ "Radiation therapy",
-    stringr::str_detect(
-      t,
-      "resection|ectomy|nephroureterectomy|exenteration|cystectomy|omentectomy|laparoscopic|excision"
-    ) ~ "Surgery",
-    stringr::str_detect(t, "pembrolizumab|nivolumab|atezolizumab|ipilimumab|durvalumab") ~ "Immunotherapy",
-    stringr::str_detect(t, "bevacizumab|panitumumab|enfortumab|rucaparib|niraparib|olaparib|doxil") ~ "Targeted therapy",
-    stringr::str_detect(
-      t,
-      "carboplatin|cisplatin|paclitaxel|taxol|taxotere|gemcitabine|oxaliplatin|irinotecan|fluorouracil|xeloda|capecitabine|doxorubicin|etoposide|topotecan|cytoxan|folinic"
-    ) ~ "Chemotherapy",
-    TRUE ~ "Other"
-  )
-}
-
-#' RECIST target-lesion codes → short labels (REDCap mapping_target_lesions)
-recist_response_label <- function(code) {
-  mapping <- c(
-    "1" = "CR",
-    "2" = "PR",
-    "3" = "SD",
-    "4" = "PD",
-    "5" = "Non-evaluable"
-  )
-  out <- unname(mapping[as.character(code)])
-  out[is.na(out) & !is.na(code) & as.character(code) != ""] <- paste0("Code ", code)
-  out
-}
-
-#' Build per-patient PFS/OS from REDCap export (RECIST BOR, discontinuation, final status).
-#'
-#' The dedicated progression_free_survival_pfs_overall_survival_os form was not completed
-#' in this export; endpoints are derived from available tumor assessments and status fields.
-build_protocol2101175_survival <- function(dat, enrolled_ids) {
-  d <- dat %>% dplyr::filter(study_id %in% enrolled_ids)
-
-  index <- d %>%
-    dplyr::filter(!is.na(.data$date_of_enrollment)) %>%
-    dplyr::group_by(study_id) %>%
-    dplyr::summarise(index_date = min(.data$date_of_enrollment, na.rm = TRUE), .groups = "drop")
-
-  ip_start <- d %>%
-    dplyr::filter(!is.na(.data$date_ip_dispensed)) %>%
-    dplyr::group_by(study_id) %>%
-    dplyr::summarise(ip_start = min(.data$date_ip_dispensed, na.rm = TRUE), .groups = "drop")
-
-  pd_bor <- d %>%
-    dplyr::filter(
-      .data$redcap_repeat_instrument == "best_overall_response",
-      .data$target_lesions == 4
-    ) %>%
-    dplyr::group_by(study_id) %>%
-    dplyr::summarise(pd_bor = min(.data$date_of_overall_response, na.rm = TRUE), .groups = "drop")
-
-  pd_disc <- d %>%
-    dplyr::filter(
-      .data$reason_for_discontinuation_from_protocol_therapy___2 == 1 |
-        .data$reason_for_removal_of_subj___4 == 1
-    ) %>%
-    dplyr::group_by(study_id) %>%
-    dplyr::summarise(
-      pd_disc = min(
-        dplyr::coalesce(
-          .data$discontinuation_from_protocol_therapy,
-          .data$date_of_discontinuation_from_protocol_activities
-        ),
-        na.rm = TRUE
-      ),
-      .groups = "drop"
-    )
-
-  death <- d %>%
-    dplyr::filter(.data$subject_status_2 == 1, !is.na(.data$date_of_final_status)) %>%
-    dplyr::group_by(study_id) %>%
-    dplyr::summarise(death_date = min(.data$date_of_final_status, na.rm = TRUE), .groups = "drop")
-
-  last_alive <- d %>%
-    dplyr::filter(!is.na(.data$date_subject_last_contacte)) %>%
-    dplyr::group_by(study_id) %>%
-    dplyr::summarise(
-      last_alive = max(.data$date_subject_last_contacte, na.rm = TRUE),
-      .groups = "drop"
-    )
-
-  fu_date_cols <- c(
-    "date_of_overall_response", "date_of_target_lesions_eva", "date_c_reactive_protein_co",
-    "date_physical_exam_perform", "date_of_discontinuation_from_protocol_activities",
-    "discontinuation_from_protocol_therapy", "end_date_monitoring",
-    "date_subject_last_contacte", "date_of_final_status"
-  )
-
-  fu <- d %>%
-    dplyr::select(study_id, dplyr::any_of(fu_date_cols)) %>%
-    tidyr::pivot_longer(-study_id, values_to = "dt") %>%
-    dplyr::mutate(dt = suppressWarnings(lubridate::ymd(.data$dt))) %>%
-    dplyr::filter(!is.na(.data$dt)) %>%
-    dplyr::group_by(study_id) %>%
-    dplyr::summarise(last_fu = max(.data$dt, na.rm = TRUE), .groups = "drop")
-
-  bor <- d %>%
-    dplyr::filter(
-      .data$redcap_repeat_instrument == "best_overall_response",
-      !is.na(.data$target_lesions)
-    ) %>%
-    dplyr::mutate(
-      best_resp = recist_response_label(.data$target_lesions),
-      bor_dt = dplyr::coalesce(.data$date_of_overall_response, .data$date_of_target_lesions_eva)
-    ) %>%
-    dplyr::arrange(.data$study_id, .data$bor_dt) %>%
-    dplyr::group_by(study_id) %>%
-    dplyr::slice_tail(n = 1) %>%
-    dplyr::ungroup() %>%
-    dplyr::select(study_id, best_recist = best_resp, last_bor_date = bor_dt)
-
-  status <- d %>%
-    dplyr::filter(.data$subject_status_2 != "") %>%
-    dplyr::group_by(study_id) %>%
-    dplyr::summarise(
-      final_status_code = .data$subject_status_2[which.max(dplyr::coalesce(
-        .data$date_of_final_status,
-        as.Date("1970-01-01")
-      ))],
-      .groups = "drop"
-    )
-
-  status_lab <- c("0" = "Alive", "1" = "Dead", "9" = "Lost to follow-up")
-
-  index %>%
-    dplyr::left_join(ip_start, by = "study_id") %>%
-    dplyr::left_join(pd_bor, by = "study_id") %>%
-    dplyr::left_join(pd_disc, by = "study_id") %>%
-    dplyr::left_join(death, by = "study_id") %>%
-    dplyr::left_join(last_alive, by = "study_id") %>%
-    dplyr::left_join(fu, by = "study_id") %>%
-    dplyr::left_join(bor, by = "study_id") %>%
-    dplyr::left_join(status, by = "study_id") %>%
-    dplyr::mutate(
-      time_zero = dplyr::coalesce(.data$ip_start, .data$index_date),
-      progression_date = pmin(.data$pd_bor, .data$pd_disc, na.rm = TRUE),
-      pfs_event = !is.na(.data$progression_date),
-      pfs_end_date = dplyr::if_else(
-        .data$pfs_event,
-        .data$progression_date,
-        dplyr::coalesce(.data$last_bor_date, .data$last_fu, .data$last_alive)
-      ),
-      pfs_days = as.numeric(.data$pfs_end_date - .data$time_zero),
-      pfs_months = .data$pfs_days / 30.44,
-      os_event = !is.na(.data$death_date),
-      os_end_date = dplyr::if_else(
-        .data$os_event,
-        .data$death_date,
-        dplyr::coalesce(.data$last_alive, .data$last_fu)
-      ),
-      os_days = as.numeric(.data$os_end_date - .data$time_zero),
-      os_months = .data$os_days / 30.44,
-      final_status = unname(status_lab[as.character(.data$final_status_code)])
-    ) %>%
-    dplyr::filter(!is.na(.data$time_zero), !is.na(.data$pfs_end_date), .data$pfs_days >= 0) %>%
-    dplyr::arrange(.data$study_id)
-}
-
-#' Infer primary tumor type from prior therapy / surgery text (no dedicated REDCap diagnosis field)
-infer_primary_tumor_type <- function(study_id, therapy_names) {
-  t <- tolower(paste(unique(therapy_names[!is.na(therapy_names) & therapy_names != ""]), collapse = " | "))
-  if (t == "") return(NA_character_)
-
-  out <- dplyr::case_when(
-    stringr::str_detect(t, "ovarian") ~ "Ovarian cancer",
-    stringr::str_detect(t, "olaparib|rucaparib|niraparib") ~ "Ovarian cancer",
-    stringr::str_detect(t, "enfortumab|nephroureterectomy|cystoprostatectomy") ~ "Urothelial carcinoma",
-    stringr::str_detect(t, "rectum|abdominoperineal") ~ "Rectal adenocarcinoma",
-    stringr::str_detect(t, "oral cavity|skull base") ~ "Head and neck squamous cell carcinoma",
-    stringr::str_detect(t, "vulva|pelvic exenteration") ~ "Cervical cancer",
-    stringr::str_detect(t, "anal") ~ "Anal squamous cell carcinoma",
-    stringr::str_detect(t, "topotecan|gemcitabine") &
-      stringr::str_detect(t, "nivolumab|pembrolizumab|ipilimumab") ~ "Urothelial carcinoma",
-    stringr::str_detect(t, "carboplatin") &
-      stringr::str_detect(t, "taxol|paclitaxel") &
-      stringr::str_detect(t, "bevacizumab|doxil|atezolizumab") ~ "Ovarian cancer",
-    stringr::str_detect(t, "etoposide") & stringr::str_detect(t, "carboplatin") ~ "Small cell carcinoma",
-    TRUE ~ NA_character_
-  )
-  if (is.na(out)) {
-    warning("Could not infer tumor type for study_id ", study_id, call. = FALSE)
-    out <- "Not specified in REDCap export"
-  }
-  out
-}
-
-# =============================================================================
-# R chunk: setup  (, include=FALSE)
-# =============================================================================
+```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, fig.width = 7, fig.height = 5)
 set.seed(123)
 
@@ -985,10 +487,138 @@ ctr_table_style <- function(kbl) {
     kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) %>%
     row_spec(0, bold = TRUE, background = "#D9E2F3")
 }
+```
 
-# =============================================================================
-# R chunk: trial-info-table  ()
-# =============================================================================
+<div id="inline-edit-toolbar" style="position:fixed;top:10px;right:10px;z-index:9999;background:#ffffff;border:1px solid #cfd8dc;border-radius:8px;padding:8px;box-shadow:0 2px 10px rgba(0,0,0,0.12);font-family:Arial,sans-serif;">
+  <button id="toggle-inline-edit" style="margin-right:8px;">Enable Edit Mode</button>
+  <button id="download-inline-html" disabled style="margin-right:8px;">Download Edited HTML</button>
+  <button id="clear-inline-edits" title="Clear browser-saved edits for this report">Clear Saved Edits</button>
+</div>
+
+<script>
+(function () {
+  var editOn = false;
+  var root = document.querySelector(".main-container") || document.body;
+  var toggleBtn = document.getElementById("toggle-inline-edit");
+  var downloadBtn = document.getElementById("download-inline-html");
+  var clearBtn = document.getElementById("clear-inline-edits");
+  var toolbar = document.getElementById("inline-edit-toolbar");
+  var storageKey = "ctr_inline_edits:" + location.pathname;
+  var saveTimer = null;
+
+  function saveEdits() {
+    try {
+      localStorage.setItem(storageKey, root.innerHTML);
+    } catch (e) {
+      console.warn("Could not save local edits:", e);
+    }
+  }
+
+  function scheduleSave() {
+    if (!editOn) return;
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveEdits, 250);
+  }
+
+  function setEditState(next) {
+    editOn = next;
+    if (editOn) {
+      root.setAttribute("contenteditable", "true");
+      root.setAttribute("spellcheck", "true");
+      root.style.outline = "2px dashed #4a90e2";
+      root.style.outlineOffset = "6px";
+      toggleBtn.textContent = "Disable Edit Mode";
+      downloadBtn.disabled = false;
+    } else {
+      root.removeAttribute("contenteditable");
+      root.style.outline = "";
+      root.style.outlineOffset = "";
+      toggleBtn.textContent = "Enable Edit Mode";
+      downloadBtn.disabled = true;
+    }
+  }
+
+  function downloadEditedHtml() {
+    var prior = toolbar ? toolbar.style.display : "";
+    if (toolbar) toolbar.style.display = "none";
+    var html = "<!doctype html>\n" + document.documentElement.outerHTML;
+    if (toolbar) toolbar.style.display = prior;
+
+    var blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "CTR_Submission_Results_Protocol2101175_edited.html";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  toggleBtn.addEventListener("click", function () {
+    setEditState(!editOn);
+  });
+
+  downloadBtn.addEventListener("click", downloadEditedHtml);
+  clearBtn.addEventListener("click", function () {
+    localStorage.removeItem(storageKey);
+    alert("Saved local edits cleared for this report URL.");
+  });
+
+  document.addEventListener("keydown", function (e) {
+    if (editOn && (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
+      e.preventDefault();
+      downloadEditedHtml();
+    }
+  });
+
+  root.addEventListener("input", scheduleSave);
+
+  try {
+    var saved = localStorage.getItem(storageKey);
+    if (saved && saved.length > 0) {
+      root.innerHTML = saved;
+    }
+  } catch (e) {
+    console.warn("Could not restore local edits:", e);
+  }
+})();
+</script>
+
+# Clinical Trial Results
+
+**Protocol:** STUDY-21-001175 (IND 156493), version 3.0 (22 May 2023)  
+**Institution:** Icahn School of Medicine at Mount Sinai / Mount Sinai Hospital  
+**Principal investigator:** Deborah Y. Doroshow, MD, PhD  
+**Data cut:** `r format(Sys.Date(), "%d %B %Y")` (REDCap export `ProtocolNo2101175PRM_DATA_2026-05-18_2135.csv`)
+
+---
+
+## Abstract
+
+**Background:** Pro-tumorigenic inflammation in solid tumors is linked to IL-1β–NLRP3 signaling and elevated C-reactive protein (CRP). Preclinical and translational work, including studies of myeloid inflammation signatures in urothelial carcinoma (e.g., Tran et al., [PMC13069984](https://pmc.ncbi.nlm.nih.gov/articles/PMC13069984/)), supported targeting this axis with colchicine. We conducted a single-center pilot trial to estimate the pharmacodynamic effect of colchicine on CRP in advanced solid tumors and high-risk urothelial carcinoma.
+
+**Methods:** Open-label, non-randomized pilot (planned N = 45). Cohort 1: metastatic/recurrent solid tumors with CRP > 5 mg/L — colchicine 0.6 mg twice daily (BID) or three times daily (TID) for 14 days. Cohort 2: resected high-risk urothelial carcinoma — colchicine 0.6 mg BID for 28 days with adjuvant nivolumab. Primary endpoint: maximum percent decline in CRP from cycle 1 day 1 during on-treatment assessment. Safety per CTCAE v5.0.
+
+**Results:** `r consented_n` patients signed informed consent; `r enrolled_n` enrolled on study and `r screen_fail_n` failed screening before enrollment (Accrual Disposition). All enrolled patients were Cohort 1 low-dose BID. Cohort 1 high-dose and Cohort 2 did not accrue (Cohort 2 closed for poor accrual). `r evaluable_efficacy_n` patients were evaluable for the primary endpoint. Mean maximum CRP decline was `r fmt_num(primary_mean)`% (SD `r fmt_num(primary_sd)`%); one-sided one-sample *t*-test *p* = `r fmt_p(primary_p)`. Treatment-related adverse events were predominantly grade 1–2. Exploratory progression-free survival (PFS) and overall survival (OS) were estimable from RECIST assessments and status records: `r n_pfs_events`/`r nrow(surv_pfs)` PFS events and `r n_dead`/`r nrow(surv_os)` deaths (not powered; dedicated PFS/OS forms were largely incomplete).
+
+**Conclusion:** In this under-accrued pilot, colchicine 0.6 mg BID was feasible in Cohort 1 with a modest pharmacodynamic signal on CRP in evaluable patients. The trial did not complete planned multi-cohort enrollment; findings are hypothesis-generating. ClinicalTrials.gov identifier: [to be completed].
+
+**Key words:** colchicine; C-reactive protein; inflammation; solid tumors; urothelial carcinoma; pilot trial
+
+---
+
+## Lessons Learned
+
+- **Accrual:** Cohort 2 (adjuvant urothelial carcinoma) closed early because of poor accrual; results should not be interpreted as lack of efficacy of the strategy in that setting.
+- **Operational:** Only the Cohort 1 low-dose (BID) sequence enrolled (`r enrolled_n`/`r 30` planned for Cohort 1); high-dose TID and Cohort 2 were not evaluable in this dataset.
+- **Endpoint:** Serial CRP collection at protocol-defined visits is essential; `r enrolled_n - evaluable_efficacy_n` enrolled patient(s) lacked sufficient on-treatment CRP pairs for the primary analysis.
+
+---
+
+## Trial Information
+
+```{r trial-info-table}
 trial_info <- tibble(
   Field = c(
     "Disease",
@@ -1016,10 +646,13 @@ trial_info %>%
     align = c("l", "l")
   ) %>%
   ctr_table_style()
+```
 
-# =============================================================================
-# R chunk: drug-info-table  ()
-# =============================================================================
+---
+
+## Drug Information
+
+```{r drug-info-table}
 drug_info <- tibble(
   `Drug information` = c(
     "Generic/working name", "Drug type", "Drug class", "Dose (Cohort 1 low)",
@@ -1039,10 +672,13 @@ drug_info %>%
     align = c("l", "l")
   ) %>%
   ctr_table_style()
+```
 
-# =============================================================================
-# R chunk: primary-assessment-table  ()
-# =============================================================================
+---
+
+## Primary Assessment Method
+
+```{r primary-assessment-table}
 primary_assess <- tibble(
   `Primary assessment` = c(
     "Title",
@@ -1076,10 +712,15 @@ primary_assess %>%
     align = c("l", "l")
   ) %>%
   ctr_table_style()
+```
 
-# =============================================================================
-# R chunk: accrual-disposition-table  ()
-# =============================================================================
+---
+
+## Accrual Disposition
+
+All `r consented_n` subjects who signed informed consent underwent screening evaluation. Enrollment status was recorded on the REDCap screening form (`was_the_subject_enrolled`: 1 = enrolled, 0 = screen failure). When organ-function or CRP thresholds were not met, the report states the clinical failure (e.g., inadequate organ function) and the screening laboratory value when available. REDCap may classify these as “inclusion criteria” screen failures because adequate organ function and CRP elevation are protocol inclusion requirements.
+
+```{r accrual-disposition-table}
 accrual_overview <- tibble(
   Disposition = c(
     "Signed informed consent",
@@ -1131,10 +772,13 @@ if (screen_fail_n > 0) {
     ) %>%
     ctr_table_style()
 }
+```
 
-# =============================================================================
-# R chunk: patient-chars-table  ()
-# =============================================================================
+---
+
+## Patient Characteristics
+
+```{r patient-chars-table}
 n_male <- sum(patient_master$gender_label == "Male", na.rm = TRUE)
 n_female <- sum(patient_master$gender_label == "Female", na.rm = TRUE)
 n_sex_other <- sum(patient_master$gender_label == "Other", na.rm = TRUE)
@@ -1230,10 +874,15 @@ pat_chars %>%
     align = c("l", "l")
   ) %>%
   ctr_table_style()
+```
 
-# =============================================================================
-# R chunk: crp-endpoint-table  ()
-# =============================================================================
+---
+
+## Primary Assessment Results
+
+### CRP endpoint by patient
+
+```{r crp-endpoint-table}
 crp_endpoint %>%
   mutate(
     baseline_crp_mg_l = round(baseline_crp_mg_l, 1),
@@ -1249,10 +898,9 @@ crp_endpoint %>%
   ) %>%
   kbl(caption = tbl_cap("Primary CRP endpoint derivation by enrolled patient.")) %>%
   ctr_table_style()
+```
 
-# =============================================================================
-# R chunk: waterfall-plot  (, fig.cap=fig_cap("Maximum percent decline in C-reactive protein (CRP) from baseline during on-treatment assessment by enrolled patient (Cohort 1 low dose). Abbreviations: CRP, C-reactive protein."))
-# =============================================================================
+```{r waterfall-plot, fig.cap=fig_cap("Maximum percent decline in C-reactive protein (CRP) from baseline during on-treatment assessment by enrolled patient (Cohort 1 low dose). Abbreviations: CRP, C-reactive protein.")}
 if (nrow(crp_endpoint) > 0) {
   crp_endpoint %>%
     mutate(study_id = factor(study_id)) %>%
@@ -1269,10 +917,9 @@ if (nrow(crp_endpoint) > 0) {
   plot.new()
   text(0.5, 0.5, "No evaluable CRP endpoint data")
 }
+```
 
-# =============================================================================
-# R chunk: crp-longitudinal-plot  (, fig.width = 9, fig.height = 11, fig.cap = fig_cap("Longitudinal peripheral blood CRP (mg/L) across protocol C1 visits (baseline C1D1 and post-baseline C1D8/C1D15) for enrolled patients with serial C1 values. Abbreviations: CRP, C-reactive protein."))
-# =============================================================================
+```{r crp-longitudinal-plot, fig.width = 9, fig.height = 11, fig.cap = fig_cap("Longitudinal peripheral blood CRP (mg/L) across protocol C1 visits (baseline C1D1 and post-baseline C1D8/C1D15) for enrolled patients with serial C1 values. Abbreviations: CRP, C-reactive protein.")}
 crp_plot <- crp_long %>%
   mutate(
     visit = case_when(
@@ -1303,10 +950,15 @@ if (nrow(crp_plot) > 0) {
   plot.new()
   text(0.5, 0.5, "No CRP longitudinal data")
 }
+```
 
-# =============================================================================
-# R chunk: toxicity-ae-patient-incidence  (, eval=nrow(ae_by_term_grade_patient) > 0)
-# =============================================================================
+---
+
+## General Toxicity Profile
+
+Treatment-related adverse events (TRAE; attribution coded as Possible/Probable/Definite) are summarized by **worst CTCAE grade per patient per preferred term** (if multiple grades are recorded for the same term, only the maximum grade is counted).
+
+```{r toxicity-ae-patient-incidence, eval=nrow(ae_by_term_grade_patient) > 0}
 ae_by_term_grade_patient %>%
   rename(`Adverse event (CTCAE v5)` = ae_term_display, Grade = ae_grade_label) %>%
   mutate(Grade = paste0("Grade ", Grade)) %>%
@@ -1319,10 +971,15 @@ ae_by_term_grade_patient %>%
     "%."
   ))) %>%
   ctr_table_style()
+```
 
-# =============================================================================
-# R chunk: pd-summary  ()
-# =============================================================================
+---
+
+## Pharmacokinetics and Pharmacodynamics
+
+Pharmacokinetics were not evaluated. Pharmacodynamic assessments included CRP (primary), ferritin, and erythrocyte sedimentation rate (ESR) when collected per protocol.
+
+```{r pd-summary}
 pd_long <- dat %>%
   filter(study_id %in% enrolled_ids) %>%
   select(study_id, redcap_event_name, crp_value, ferritin_value_num, esr_value_num) %>%
@@ -1359,10 +1016,9 @@ pd_summary <- pd_long %>%
 pd_summary %>%
   kbl(caption = tbl_cap("Pharmacodynamic laboratory values (all on-study assessments, enrolled patients).")) %>%
   ctr_table_style()
+```
 
-# =============================================================================
-# R chunk: pd-change-summary  (, results='asis')
-# =============================================================================
+```{r pd-change-summary, results='asis'}
 # PD change block: baseline (C1D1; screening fallback) to post-baseline C1 (C1D8/C1D15).
 pd_marker_cols <- c(
   crp_value = "CRP (mg/L)",
@@ -1463,10 +1119,9 @@ cat(
   " patient(s).\n\n",
   sep = ""
 )
+```
 
-# =============================================================================
-# R chunk: pd-crp-responders  ()
-# =============================================================================
+```{r pd-crp-responders}
 crp_response <- pd_change %>%
   filter(marker == "CRP (mg/L)") %>%
   summarise(
@@ -1483,10 +1138,15 @@ crp_response <- pd_change %>%
 crp_response %>%
   kbl(caption = tbl_cap("CRP pharmacodynamic response summary among evaluable patients.")) %>%
   ctr_table_style()
+```
 
-# =============================================================================
-# R chunk: bor-summary  ()
-# =============================================================================
+---
+
+## Patient Status and Survival
+
+Progression-free survival (PFS) and overall survival (OS) were **not captured on the dedicated REDCap PFS/OS form** in this export (all `subject_progression_status` fields blank). Endpoints below were derived per patient from: (1) RECIST 1.1 best overall response (progressive disease [PD] date); (2) protocol therapy discontinuation for documented progression; (3) final subject status and date of death or last contact. Time zero = first investigational product dispense date, or enrollment if missing.
+
+```{r bor-summary}
 bor_tbl <- surv_dat %>%
   transmute(`Best overall response (RECIST 1.1)` = coalesce(best_recist, "Not assessed")) %>%
   count(`Best overall response (RECIST 1.1)`, name = "N patients") %>%
@@ -1496,10 +1156,9 @@ bor_tbl <- surv_dat %>%
 bor_tbl %>%
   kbl(caption = tbl_cap("Exploratory best overall response (RECIST 1.1) among enrolled patients.")) %>%
   ctr_table_style()
+```
 
-# =============================================================================
-# R chunk: pfs-os-summary  ()
-# =============================================================================
+```{r pfs-os-summary}
 surv_summary <- tibble(
   Endpoint = c("Progression-free survival", "Overall survival"),
   `N patients` = c(nrow(surv_pfs), nrow(surv_os)),
@@ -1526,19 +1185,17 @@ surv_summary <- tibble(
 surv_summary %>%
   kbl(caption = tbl_cap("Exploratory progression-free survival and overall survival summary (Kaplan–Meier medians).")) %>%
   ctr_table_style()
+```
 
-# =============================================================================
-# R chunk: pfs-os-by-patient  ()
-# =============================================================================
+```{r pfs-os-by-patient}
 pfs_os_tbl %>%
   kbl(
     caption = tbl_cap("Patient-level progression-free survival and overall survival (derived from RECIST, discontinuation, and final status fields).")
   ) %>%
   ctr_table_style()
+```
 
-# =============================================================================
-# R chunk: km-pfs  (, fig.cap=fig_cap("Progression-free survival (Kaplan–Meier) from treatment start (exploratory; not powered). PFS events: RECIST PD or discontinuation for progression. Abbreviations: PFS, progression-free survival; PD, progressive disease; RECIST, Response Evaluation Criteria in Solid Tumors."), eval=!is.null(fit_pfs))
-# =============================================================================
+```{r km-pfs, fig.cap=fig_cap("Progression-free survival (Kaplan–Meier) from treatment start (exploratory; not powered). PFS events: RECIST PD or discontinuation for progression. Abbreviations: PFS, progression-free survival; PD, progressive disease; RECIST, Response Evaluation Criteria in Solid Tumors."), eval=!is.null(fit_pfs)}
 if (!is.null(fit_pfs)) {
   ggsurvplot(
     fit_pfs,
@@ -1552,10 +1209,9 @@ if (!is.null(fit_pfs)) {
     risk.table.height = 0.25
   )
 }
+```
 
-# =============================================================================
-# R chunk: km-os  (, fig.cap=fig_cap("Overall survival (Kaplan–Meier) from treatment start (exploratory; not powered). Abbreviations: OS, overall survival."), eval=!is.null(fit_os))
-# =============================================================================
+```{r km-os, fig.cap=fig_cap("Overall survival (Kaplan–Meier) from treatment start (exploratory; not powered). Abbreviations: OS, overall survival."), eval=!is.null(fit_os)}
 if (!is.null(fit_os)) {
   ggsurvplot(
     fit_os,
@@ -1569,10 +1225,64 @@ if (!is.null(fit_os)) {
     risk.table.height = 0.25
   )
 }
+```
 
-# =============================================================================
-# R chunk: appendix-included-subjects  ()
-# =============================================================================
+*These survival analyses are descriptive and underpowered (pilot N = `r enrolled_n`). Medians and curves should be interpreted cautiously; several patients lack formal final-status forms but have tumor assessment or visit dates used for censoring.*
+
+---
+
+## Discussion
+
+This pilot trial (STUDY-21-001175) was designed to test whether short-course colchicine suppresses peripheral blood CRP as a pharmacodynamic marker of pro-tumorigenic inflammation in advanced solid tumors and in high-risk urothelial carcinoma receiving adjuvant nivolumab. The scientific premise builds on NLRP3–IL-1β biology and translational studies linking myeloid inflammation to checkpoint inhibitor resistance, including work by Tran and colleagues ([PMC13069984](https://pmc.ncbi.nlm.nih.gov/articles/PMC13069984/)) that informed the protocol’s correlative agenda.
+
+**Accrual and conduct.** Only the Cohort 1 low-dose (colchicine 0.6 mg BID) group enrolled (`r enrolled_n` patients). The sequential high-dose cohort and Cohort 2 did not enroll in this dataset; **Cohort 2 was closed because of poor accrual**, not because of a pre-specified efficacy or safety stopping rule. This limits generalizability to the adjuvant urothelial setting and precludes the planned dose-comparison and Cohort 2 primary analysis.
+
+**Primary endpoint.** Among `r evaluable_efficacy_n` evaluable patients, the mean maximum CRP decline was `r fmt_num(primary_mean)`% (SD `r fmt_num(primary_sd)`%). The prespecified one-sided one-sample *t*-test at α = 0.025 yielded *p* = `r fmt_p(primary_p)`, which does not meet the protocol’s threshold for concluding a statistically significant anti-inflammatory effect in this small, incomplete sample. Individual responses varied, and some patients had rising on-treatment CRP, emphasizing heterogeneity in a heavily pretreated population.
+
+**Safety.** Adverse events were manageable and predominantly low grade, consistent with known colchicine toxicities (gastrointestinal symptoms). Attribution to colchicine should be interpreted cautiously in patients with advanced cancer and concurrent comorbidities.
+
+**Clinical implications.** These results do not establish clinical benefit on tumor endpoints. They provide feasibility and preliminary pharmacodynamic data for colchicine 0.6 mg BID in Cohort 1 only. Whether CRP suppression translates to improved outcomes with systemic therapy remains untested. The trial illustrates the CTR reporting value of publishing under-accrued pilots with explicit lessons learned.
+
+**Next steps.** Future studies would require successful accrual to planned cohorts, standardized CRP sampling, and integration with outcome and correlative endpoints (ctDNA, myeloid signatures) prespecified in the protocol.
+
+---
+
+## Acknowledgments
+
+[To be completed by investigators.]
+
+## Funding
+
+[To be completed.]
+
+## Conflict of Interest
+
+[To be completed.]
+
+## Data Availability
+
+De-identified data may be made available upon reasonable request to the corresponding author and subject to institutional approval.
+
+## Author Contributions
+
+[To be completed.]
+
+## References
+
+1. Doroshow DB, Galsky MD, Marron TU, et al. Protocol STUDY-21-001175, version 3.0 (22 May 2023). Icahn School of Medicine at Mount Sinai.  
+2. Tran M, et al. [Pro-tumorigenic inflammation / urothelial carcinoma translational study; PMC13069984](https://pmc.ncbi.nlm.nih.gov/articles/PMC13069984/).  
+3. Ridker PM, et al. CANTOS trial. *Lancet*. 2017.  
+4. CheckMate 274: adjuvant nivolumab in high-risk urothelial carcinoma.  
+
+---
+
+## Figures and Tables
+
+All primary tables and figures are embedded in the sections above. Additional correlative analyses (ctDNA, cytokines, single-cell myeloid signatures) were prespecified but are not included in this CTR results report pending separate correlative manuscripts.
+
+## Appendix: Included Subjects Dataset
+
+```{r appendix-included-subjects}
 included_subject_ids <- sort(unique(crp_endpoint$study_id))
 
 included_crp_visits <- crp_long %>%
@@ -1661,3 +1371,8 @@ included_tbl %>%
     ))
   ) %>%
   ctr_table_style()
+```
+
+---
+
+*Internal analytic report generated from REDCap export. Verify all numbers against source data and PI review before journal submission.*

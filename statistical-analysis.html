@@ -34,54 +34,1669 @@ tr:nth-child(even) td { background: #f2f6fa; }
 <p>Progression-free survival and overall survival used Kaplan–Meier methods (exploratory; not powered). PFS: 5 events among 11; OS: 4 events among 11; medians not estimable.</p>
 
 <h2>Statistical code (R)</h2>
-<pre><code># STUDY-21-001175 — prespecified and exploratory analyses (R 4.x)
-# Data cut: ProtocolNo2101175PRM_DATA_2026-05-18_2135.csv
-# Cohort 1 low dose only (colchicine 0.6 mg oral BID x 14 days)
+<pre><code># STUDY-21-001175 — full statistical analysis code (extracted from CTR R Markdown)
+# Source: CTR_Submission_Results_Protocol2101175.Rmd
+# Data: ProtocolNo2101175PRM_DATA_2026-05-18_2135.csv
+# Helpers: protocol2101175_redcap_helpers.R
 
-library(dplyr)
-library(survival)
+# =============================================================================
+# protocol2101175_redcap_helpers.R
+# =============================================================================
+# Helpers for Protocol 2101175 REDCap CTR report (labels, therapy class, tumor type).
 
-dat &lt;- read.csv(&quot;ProtocolNo2101175PRM_DATA_2026-05-18_2135.csv&quot;)
+#&#x27; Load CTCAE v5 term labels from REDCap companion .r export
+load_ctcae_term_labels &lt;- function(path = here::here(&quot;ProtocolNo2101175PRM_R_2026-05-18_2135.r&quot;)) {
+  lines &lt;- readLines(path, encoding = &quot;UTF-8&quot;, warn = FALSE)
+  if (length(lines) &gt; 0 &amp;&amp; startsWith(lines[[1]], &quot;\ufeff&quot;)) {
+    lines[[1]] &lt;- sub(&quot;^\ufeff&quot;, &quot;&quot;, lines[[1]])
+  }
+  start_ln &lt;- which(grepl(&quot;^mapping_ae_term_ctcaev5\\s*=\\s*c\\(&quot;, lines))[1]
+  end_ln &lt;- which(grepl(&quot;^mapping_meddra_soc\\s*=\\s*c\\(&quot;, lines))[1] - 1
+  if (is.na(start_ln) || is.na(end_ln)) {
+    stop(&quot;Could not locate mapping_ae_term_ctcaev5 in &quot;, path, call. = FALSE)
+  }
 
-# --- Primary endpoint: max % CRP decline from C1D1 during C1 on-treatment visits ---
-crp_c1 &lt;- dat %&gt;%
-  filter(redcap_event_name %in% c(&quot;cycle_1_day_1_arm_1&quot;, &quot;cycle_1_day_8_arm_1&quot;, &quot;cycle_1_day_15_arm_1&quot;)) %&gt;%
-  select(study_id, redcap_event_name, c_reactive_protein_mg_l) %&gt;%
-  tidyr::pivot_wider(names_from = redcap_event_name, values_from = c_reactive_protein_mg_l)
+  # Line-parse (companion file has a few non-standard keys that break source()).
+  terms &lt;- character()
+  for (ln in lines[start_ln:end_ln]) {
+    m &lt;- regexec(
+      &#x27;^[[:space:]]*&quot;([^&quot;]+)&quot;[[:space:]]*=[[:space:]]*&quot;([^&quot;]*)&quot;&#x27;,
+      ln,
+      perl = TRUE
+    )
+    if (length(m) &lt; 1L || m[[1]][[1L]] &lt; 0L) next
+    caps &lt;- regmatches(ln, m)[[1]]
+    if (length(caps) &lt; 3 || is.na(caps[[3]])) next
+    code &lt;- caps[[2]]
+    raw_val &lt;- as.character(caps[[3]])
+    if (!nzchar(raw_val)) next
+    term &lt;- trimws(strsplit(raw_val, &quot;\t&quot;, fixed = TRUE)[[1]][1])
+    if (!nzchar(term)) next
+    terms[code] &lt;- term
+  }
+  terms
+}
 
-crp_eval &lt;- crp_c1 %&gt;%
+#&#x27; Map one CTCAE code (numeric or character) to preferred term
+ctcae_term_label &lt;- function(code, term_map) {
+  if (length(code) == 0) return(character(0))
+  key &lt;- as.character(code)
+  out &lt;- unname(term_map[key])
+  miss &lt;- is.na(out) &amp; !is.na(code) &amp; key != &quot;&quot;
+  if (any(miss)) {
+    out[miss] &lt;- paste0(&quot;CTCAE code &quot;, key[miss])
+  }
+  out
+}
+
+#&#x27; Extract screening laboratory values for a subject (first non-missing on screening visits).
+protocol2101175_screening_labs &lt;- function(dat, subject_id) {
+  screening_events &lt;- c(&quot;screening_28_days_arm_1&quot;, &quot;screening_arm_2&quot;, &quot;screening_arm_3&quot;)
+  lab_cols &lt;- c(
+    &quot;hemoglobin_g_dl&quot;, &quot;creatinine_mg_dl&quot;, &quot;ast_u_l&quot;, &quot;alt_u_l&quot;,
+    &quot;bilirubin_total_mg_dl&quot;, &quot;neutrophils&quot;, &quot;c_reactive_protein_value&quot;
+  )
+
+  screen_rows &lt;- dat %&gt;%
+    dplyr::filter(
+      .data$study_id == .env$subject_id,
+      .data$redcap_event_name %in% screening_events
+    )
+
+  primary_row &lt;- screen_rows %&gt;%
+    dplyr::filter(is.na(.data$redcap_repeat_instrument) | .data$redcap_repeat_instrument == &quot;&quot;) %&gt;%
+    dplyr::slice(1)
+
+  source_rows &lt;- if (nrow(primary_row) &gt; 0) primary_row else screen_rows %&gt;% dplyr::slice(1)
+  if (nrow(source_rows) == 0) {
+    return(tibble::tibble())
+  }
+
+  source_rows %&gt;%
+    dplyr::select(dplyr::any_of(lab_cols)) %&gt;%
+    tidyr::pivot_longer(dplyr::everything(), names_to = &quot;lab&quot;, values_to = &quot;value&quot;) %&gt;%
+    dplyr::mutate(value = suppressWarnings(as.numeric(.data$value))) %&gt;%
+    dplyr::filter(!is.na(.data$value)) %&gt;%
+    dplyr::group_by(.data$lab) %&gt;%
+    dplyr::summarise(value = .data$value[[1]], .groups = &quot;drop&quot;) %&gt;%
+    tidyr::pivot_wider(names_from = .data$lab, values_from = .data$value)
+}
+
+#&#x27; Identify organ-function values that fail protocol inclusion thresholds.
+protocol2101175_organ_function_failures &lt;- function(labs) {
+  if (nrow(labs) == 0) return(character())
+
+  fails &lt;- character()
+  if (&quot;hemoglobin_g_dl&quot; %in% names(labs) &amp;&amp; !is.na(labs$hemoglobin_g_dl) &amp;&amp; labs$hemoglobin_g_dl &lt; 8) {
+    fails &lt;- c(fails, paste0(&quot;hemoglobin &quot;, labs$hemoglobin_g_dl, &quot; g/dL (required &gt;=8 g/dL)&quot;))
+  }
+  if (&quot;neutrophils&quot; %in% names(labs) &amp;&amp; !is.na(labs$neutrophils) &amp;&amp; labs$neutrophils &lt; 1.5) {
+    fails &lt;- c(fails, paste0(&quot;ANC &quot;, labs$neutrophils, &quot; x10^3/uL (required &gt;=1.5 x10^3/uL)&quot;))
+  }
+  if (&quot;creatinine_mg_dl&quot; %in% names(labs) &amp;&amp; !is.na(labs$creatinine_mg_dl) &amp;&amp; labs$creatinine_mg_dl &gt; 1.5) {
+    fails &lt;- c(fails, paste0(&quot;creatinine &quot;, labs$creatinine_mg_dl, &quot; mg/dL (required &lt;=1.5 mg/dL)&quot;))
+  }
+  fails
+}
+
+#&#x27; Build publication-ready screen-failure reason/detail from REDCap screening row.
+protocol2101175_screen_fail_labels &lt;- function(row, labs = NULL) {
+  reason_labels &lt;- c(
+    reason_for_screen_fail___1 = &quot;Inclusion criteria&quot;,
+    reason_for_screen_fail___2 = &quot;Exclusion criteria&quot;,
+    reason_for_screen_fail___3 = &quot;Surpassed screening window&quot;,
+    reason_for_screen_fail___4 = &quot;Physician decision to discontinue&quot;,
+    reason_for_screen_fail___5 = &quot;Patient decision to discontinue&quot;,
+    reason_for_screen_fail___6 = &quot;Other&quot;
+  )
+
+  inc_fail_labels &lt;- c(
+    &quot;4&quot; = &quot;CRP below inclusion threshold&quot;,
+    &quot;8&quot; = &quot;Inadequate organ function&quot;
+  )
+
+  exc_labels &lt;- c(
+    &quot;1&quot; = &quot;Long-term colchicine use&quot;,
+    &quot;2&quot; = &quot;Active infection requiring systemic therapy&quot;,
+    &quot;3&quot; = &quot;Pregnant or breastfeeding&quot;,
+    &quot;4&quot; = &quot;Prior cancer treatment within 30 days / 5 half-lives&quot;,
+    &quot;5&quot; = &quot;Prior/concurrent malignancy interfering with assessment&quot;,
+    &quot;6&quot; = &quot;Active CNS metastases&quot;,
+    &quot;7&quot; = &quot;Investigational drug within 30 days&quot;,
+    &quot;8&quot; = &quot;Prohibited concomitant medications&quot;,
+    &quot;9&quot; = &quot;RA/vasculitis/SLE requiring active treatment&quot;,
+    &quot;10&quot; = &quot;Recent MI or NYHA class III+ heart failure&quot;
+  )
+
+  checked_nums &lt;- function(prefix) {
+    cols &lt;- grep(paste0(&quot;^&quot;, prefix, &quot;___[0-9]+$&quot;), names(row), value = TRUE)
+    hit &lt;- cols[!is.na(row[cols]) &amp; row[cols] == 1]
+    gsub(paste0(prefix, &quot;___&quot;), &quot;&quot;, hit)
+  }
+
+  redcap_reason &lt;- {
+    hit &lt;- names(reason_labels)[vapply(
+      names(reason_labels),
+      function(nm) !is.na(row[[nm]]) &amp;&amp; row[[nm]] == 1,
+      logical(1)
+    )]
+    if (length(hit) == 0) NA_character_ else paste(unname(reason_labels[hit]), collapse = &quot;; &quot;)
+  }
+
+  inc_nums &lt;- checked_nums(&quot;inclusion_criteria_causing&quot;)
+  exc_nums &lt;- checked_nums(&quot;exclusion_criteria_causing&quot;)
+  other &lt;- row$if_other_please_mention_de[[1]]
+
+  detail_parts &lt;- character()
+  clinical_reason &lt;- NA_character_
+
+  if (&quot;8&quot; %in% inc_nums) {
+    clinical_reason &lt;- &quot;Inadequate organ function&quot;
+    organ_fails &lt;- if (!is.null(labs)) protocol2101175_organ_function_failures(labs) else character()
+    if (length(organ_fails) &gt; 0) {
+      detail_parts &lt;- c(
+        detail_parts,
+        paste0(
+          &quot;Did not meet inclusion organ-function criteria; &quot;,
+          paste(organ_fails, collapse = &quot;; &quot;)
+        )
+      )
+    } else {
+      detail_parts &lt;- c(
+        detail_parts,
+        &quot;Did not meet inclusion organ-function criteria (specific abnormal value not available in export)&quot;
+      )
+    }
+  }
+
+  if (&quot;4&quot; %in% inc_nums) {
+    clinical_reason &lt;- &quot;CRP below inclusion threshold&quot;
+    crp_val &lt;- if (!is.null(labs) &amp;&amp; &quot;c_reactive_protein_value&quot; %in% names(labs)) {
+      labs$c_reactive_protein_value
+    } else {
+      NA_real_
+    }
+    detail_parts &lt;- c(
+      detail_parts,
+      if (!is.na(crp_val)) {
+        paste0(&quot;CRP &quot;, crp_val, &quot; mg/L (required &gt;5 mg/L)&quot;)
+      } else {
+        &quot;Did not meet inclusion CRP criterion (CRP &gt;5 mg/L)&quot;
+      }
+    )
+  }
+
+  other_inc &lt;- setdiff(inc_nums, c(&quot;4&quot;, &quot;8&quot;))
+  if (length(other_inc) &gt; 0) {
+    if (is.na(clinical_reason)) clinical_reason &lt;- &quot;Did not meet inclusion criteria&quot;
+    detail_parts &lt;- c(
+      detail_parts,
+      paste0(&quot;Additional inclusion criterion not met (REDCap code &quot;, paste(other_inc, collapse = &quot;, &quot;), &quot;)&quot;)
+    )
+  }
+
+  if (length(exc_nums) &gt; 0) {
+    if (is.na(clinical_reason)) {
+      clinical_reason &lt;- &quot;Met exclusion criteria&quot;
+    }
+    detail_parts &lt;- c(
+      detail_parts,
+      paste0(
+        &quot;Met exclusion criterion: &quot;,
+        paste(unname(exc_labels[exc_nums]), collapse = &quot;; &quot;)
+      )
+    )
+  }
+
+  if (!is.na(other) &amp;&amp; nzchar(other)) {
+    if (is.na(clinical_reason)) clinical_reason &lt;- &quot;Other&quot;
+    detail_parts &lt;- c(detail_parts, other)
+  }
+
+  if (is.na(clinical_reason)) {
+    clinical_reason &lt;- redcap_reason
+  }
+
+  if (length(detail_parts) == 0) {
+    detail_parts &lt;- if (!is.na(redcap_reason)) {
+      paste0(&quot;REDCap screen-fail category: &quot;, redcap_reason)
+    } else {
+      NA_character_
+    }
+  }
+
+  list(
+    screen_fail_reason_redcap = redcap_reason,
+    screen_fail_reason = clinical_reason,
+    screen_fail_detail = paste(detail_parts, collapse = &quot;; &quot;)
+  )
+}
+
+#&#x27; Build accrual disposition (consent, enrollment, screen-fail) from screening visits.
+build_protocol2101175_screen_disposition &lt;- function(dat) {
+  screening_events &lt;- c(&quot;screening_28_days_arm_1&quot;, &quot;screening_arm_2&quot;, &quot;screening_arm_3&quot;)
+
+  consent &lt;- dat %&gt;%
+    dplyr::filter(!is.na(.data$date_informed_consent_sign)) %&gt;%
+    dplyr::group_by(.data$study_id) %&gt;%
+    dplyr::summarise(
+      consent_date = min(.data$date_informed_consent_sign, na.rm = TRUE),
+      .groups = &quot;drop&quot;
+    )
+
+  disp_rows &lt;- dat %&gt;%
+    dplyr::filter(
+      .data$redcap_event_name %in% screening_events,
+      !is.na(.data$was_the_subject_enrolled)
+    ) %&gt;%
+    dplyr::group_by(.data$study_id) %&gt;%
+    dplyr::slice(1) %&gt;%
+    dplyr::ungroup()
+
+  if (nrow(disp_rows) == 0) {
+    stop(&quot;No screening disposition rows with was_the_subject_enrolled found.&quot;, call. = FALSE)
+  }
+
+  label_mat &lt;- lapply(seq_len(nrow(disp_rows)), function(i) {
+    row &lt;- disp_rows[i, , drop = FALSE]
+    sid &lt;- row$study_id[[1]]
+    labs &lt;- protocol2101175_screening_labs(dat, sid)
+    protocol2101175_screen_fail_labels(row, labs)
+  })
+
+  consent %&gt;%
+    dplyr::left_join(
+      disp_rows %&gt;%
+        dplyr::transmute(
+          study_id = .data$study_id,
+          enrolled_flag = .data$was_the_subject_enrolled,
+          enroll_date = .data$date_of_enrollment
+        ),
+      by = &quot;study_id&quot;
+    ) %&gt;%
+    dplyr::mutate(
+      screen_fail_reason_redcap = vapply(label_mat, `[[`, character(1), &quot;screen_fail_reason_redcap&quot;),
+      screen_fail_reason = vapply(label_mat, `[[`, character(1), &quot;screen_fail_reason&quot;),
+      screen_fail_detail = vapply(label_mat, `[[`, character(1), &quot;screen_fail_detail&quot;),
+      enrolled = .data$enrolled_flag == 1,
+      screen_fail = .data$enrolled_flag == 0,
+      disposition = dplyr::case_when(
+        .data$enrolled ~ &quot;Enrolled&quot;,
+        .data$screen_fail ~ &quot;Screen failure&quot;,
+        TRUE ~ &quot;Unknown&quot;
+      )
+    ) %&gt;%
+    dplyr::arrange(.data$study_id)
+}
+
+#&#x27; Summarize screen-failure reasons for accrual table
+summarise_screen_fail_reasons &lt;- function(disposition) {
+  sf &lt;- disposition %&gt;% dplyr::filter(.data$screen_fail)
+  if (nrow(sf) == 0) {
+    return(tibble::tibble(
+      `Screen-failure reason` = character(),
+      `N` = integer(),
+      `Details` = character()
+    ))
+  }
+
+  sf %&gt;%
+    dplyr::group_by(.data$screen_fail_reason) %&gt;%
+    dplyr::summarise(
+      `N` = dplyr::n(),
+      `Details` = paste(unique(stats::na.omit(.data$screen_fail_detail)), collapse = &quot; | &quot;),
+      .groups = &quot;drop&quot;
+    ) %&gt;%
+    dplyr::rename(`Screen-failure reason` = .data$screen_fail_reason) %&gt;%
+    dplyr::arrange(dplyr::desc(.data$`N`))
+}
+
+#&#x27; Classify a prior-therapy row into a publication-friendly class
+classify_prior_therapy &lt;- function(therapy_name) {
+  t &lt;- tolower(trimws(therapy_name))
+  dplyr::case_when(
+    is.na(t) | t == &quot;&quot; ~ NA_character_,
+    stringr::str_detect(t, &quot;radiotherapy|^rt |^xrt|sbrt|rx dose|neoadjuvant rt|adjuvant rt&quot;) ~ &quot;Radiation therapy&quot;,
+    stringr::str_detect(
+      t,
+      &quot;resection|ectomy|nephroureterectomy|exenteration|cystectomy|omentectomy|laparoscopic|excision&quot;
+    ) ~ &quot;Surgery&quot;,
+    stringr::str_detect(t, &quot;pembrolizumab|nivolumab|atezolizumab|ipilimumab|durvalumab&quot;) ~ &quot;Immunotherapy&quot;,
+    stringr::str_detect(t, &quot;bevacizumab|panitumumab|enfortumab|rucaparib|niraparib|olaparib|doxil&quot;) ~ &quot;Targeted therapy&quot;,
+    stringr::str_detect(
+      t,
+      &quot;carboplatin|cisplatin|paclitaxel|taxol|taxotere|gemcitabine|oxaliplatin|irinotecan|fluorouracil|xeloda|capecitabine|doxorubicin|etoposide|topotecan|cytoxan|folinic&quot;
+    ) ~ &quot;Chemotherapy&quot;,
+    TRUE ~ &quot;Other&quot;
+  )
+}
+
+#&#x27; RECIST target-lesion codes → short labels (REDCap mapping_target_lesions)
+recist_response_label &lt;- function(code) {
+  mapping &lt;- c(
+    &quot;1&quot; = &quot;CR&quot;,
+    &quot;2&quot; = &quot;PR&quot;,
+    &quot;3&quot; = &quot;SD&quot;,
+    &quot;4&quot; = &quot;PD&quot;,
+    &quot;5&quot; = &quot;Non-evaluable&quot;
+  )
+  out &lt;- unname(mapping[as.character(code)])
+  out[is.na(out) &amp; !is.na(code) &amp; as.character(code) != &quot;&quot;] &lt;- paste0(&quot;Code &quot;, code)
+  out
+}
+
+#&#x27; Build per-patient PFS/OS from REDCap export (RECIST BOR, discontinuation, final status).
+#&#x27;
+#&#x27; The dedicated progression_free_survival_pfs_overall_survival_os form was not completed
+#&#x27; in this export; endpoints are derived from available tumor assessments and status fields.
+build_protocol2101175_survival &lt;- function(dat, enrolled_ids) {
+  d &lt;- dat %&gt;% dplyr::filter(study_id %in% enrolled_ids)
+
+  index &lt;- d %&gt;%
+    dplyr::filter(!is.na(.data$date_of_enrollment)) %&gt;%
+    dplyr::group_by(study_id) %&gt;%
+    dplyr::summarise(index_date = min(.data$date_of_enrollment, na.rm = TRUE), .groups = &quot;drop&quot;)
+
+  ip_start &lt;- d %&gt;%
+    dplyr::filter(!is.na(.data$date_ip_dispensed)) %&gt;%
+    dplyr::group_by(study_id) %&gt;%
+    dplyr::summarise(ip_start = min(.data$date_ip_dispensed, na.rm = TRUE), .groups = &quot;drop&quot;)
+
+  pd_bor &lt;- d %&gt;%
+    dplyr::filter(
+      .data$redcap_repeat_instrument == &quot;best_overall_response&quot;,
+      .data$target_lesions == 4
+    ) %&gt;%
+    dplyr::group_by(study_id) %&gt;%
+    dplyr::summarise(pd_bor = min(.data$date_of_overall_response, na.rm = TRUE), .groups = &quot;drop&quot;)
+
+  pd_disc &lt;- d %&gt;%
+    dplyr::filter(
+      .data$reason_for_discontinuation_from_protocol_therapy___2 == 1 |
+        .data$reason_for_removal_of_subj___4 == 1
+    ) %&gt;%
+    dplyr::group_by(study_id) %&gt;%
+    dplyr::summarise(
+      pd_disc = min(
+        dplyr::coalesce(
+          .data$discontinuation_from_protocol_therapy,
+          .data$date_of_discontinuation_from_protocol_activities
+        ),
+        na.rm = TRUE
+      ),
+      .groups = &quot;drop&quot;
+    )
+
+  death &lt;- d %&gt;%
+    dplyr::filter(.data$subject_status_2 == 1, !is.na(.data$date_of_final_status)) %&gt;%
+    dplyr::group_by(study_id) %&gt;%
+    dplyr::summarise(death_date = min(.data$date_of_final_status, na.rm = TRUE), .groups = &quot;drop&quot;)
+
+  last_alive &lt;- d %&gt;%
+    dplyr::filter(!is.na(.data$date_subject_last_contacte)) %&gt;%
+    dplyr::group_by(study_id) %&gt;%
+    dplyr::summarise(
+      last_alive = max(.data$date_subject_last_contacte, na.rm = TRUE),
+      .groups = &quot;drop&quot;
+    )
+
+  fu_date_cols &lt;- c(
+    &quot;date_of_overall_response&quot;, &quot;date_of_target_lesions_eva&quot;, &quot;date_c_reactive_protein_co&quot;,
+    &quot;date_physical_exam_perform&quot;, &quot;date_of_discontinuation_from_protocol_activities&quot;,
+    &quot;discontinuation_from_protocol_therapy&quot;, &quot;end_date_monitoring&quot;,
+    &quot;date_subject_last_contacte&quot;, &quot;date_of_final_status&quot;
+  )
+
+  fu &lt;- d %&gt;%
+    dplyr::select(study_id, dplyr::any_of(fu_date_cols)) %&gt;%
+    tidyr::pivot_longer(-study_id, values_to = &quot;dt&quot;) %&gt;%
+    dplyr::mutate(dt = suppressWarnings(lubridate::ymd(.data$dt))) %&gt;%
+    dplyr::filter(!is.na(.data$dt)) %&gt;%
+    dplyr::group_by(study_id) %&gt;%
+    dplyr::summarise(last_fu = max(.data$dt, na.rm = TRUE), .groups = &quot;drop&quot;)
+
+  bor &lt;- d %&gt;%
+    dplyr::filter(
+      .data$redcap_repeat_instrument == &quot;best_overall_response&quot;,
+      !is.na(.data$target_lesions)
+    ) %&gt;%
+    dplyr::mutate(
+      best_resp = recist_response_label(.data$target_lesions),
+      bor_dt = dplyr::coalesce(.data$date_of_overall_response, .data$date_of_target_lesions_eva)
+    ) %&gt;%
+    dplyr::arrange(.data$study_id, .data$bor_dt) %&gt;%
+    dplyr::group_by(study_id) %&gt;%
+    dplyr::slice_tail(n = 1) %&gt;%
+    dplyr::ungroup() %&gt;%
+    dplyr::select(study_id, best_recist = best_resp, last_bor_date = bor_dt)
+
+  status &lt;- d %&gt;%
+    dplyr::filter(.data$subject_status_2 != &quot;&quot;) %&gt;%
+    dplyr::group_by(study_id) %&gt;%
+    dplyr::summarise(
+      final_status_code = .data$subject_status_2[which.max(dplyr::coalesce(
+        .data$date_of_final_status,
+        as.Date(&quot;1970-01-01&quot;)
+      ))],
+      .groups = &quot;drop&quot;
+    )
+
+  status_lab &lt;- c(&quot;0&quot; = &quot;Alive&quot;, &quot;1&quot; = &quot;Dead&quot;, &quot;9&quot; = &quot;Lost to follow-up&quot;)
+
+  index %&gt;%
+    dplyr::left_join(ip_start, by = &quot;study_id&quot;) %&gt;%
+    dplyr::left_join(pd_bor, by = &quot;study_id&quot;) %&gt;%
+    dplyr::left_join(pd_disc, by = &quot;study_id&quot;) %&gt;%
+    dplyr::left_join(death, by = &quot;study_id&quot;) %&gt;%
+    dplyr::left_join(last_alive, by = &quot;study_id&quot;) %&gt;%
+    dplyr::left_join(fu, by = &quot;study_id&quot;) %&gt;%
+    dplyr::left_join(bor, by = &quot;study_id&quot;) %&gt;%
+    dplyr::left_join(status, by = &quot;study_id&quot;) %&gt;%
+    dplyr::mutate(
+      time_zero = dplyr::coalesce(.data$ip_start, .data$index_date),
+      progression_date = pmin(.data$pd_bor, .data$pd_disc, na.rm = TRUE),
+      pfs_event = !is.na(.data$progression_date),
+      pfs_end_date = dplyr::if_else(
+        .data$pfs_event,
+        .data$progression_date,
+        dplyr::coalesce(.data$last_bor_date, .data$last_fu, .data$last_alive)
+      ),
+      pfs_days = as.numeric(.data$pfs_end_date - .data$time_zero),
+      pfs_months = .data$pfs_days / 30.44,
+      os_event = !is.na(.data$death_date),
+      os_end_date = dplyr::if_else(
+        .data$os_event,
+        .data$death_date,
+        dplyr::coalesce(.data$last_alive, .data$last_fu)
+      ),
+      os_days = as.numeric(.data$os_end_date - .data$time_zero),
+      os_months = .data$os_days / 30.44,
+      final_status = unname(status_lab[as.character(.data$final_status_code)])
+    ) %&gt;%
+    dplyr::filter(!is.na(.data$time_zero), !is.na(.data$pfs_end_date), .data$pfs_days &gt;= 0) %&gt;%
+    dplyr::arrange(.data$study_id)
+}
+
+#&#x27; Infer primary tumor type from prior therapy / surgery text (no dedicated REDCap diagnosis field)
+infer_primary_tumor_type &lt;- function(study_id, therapy_names) {
+  t &lt;- tolower(paste(unique(therapy_names[!is.na(therapy_names) &amp; therapy_names != &quot;&quot;]), collapse = &quot; | &quot;))
+  if (t == &quot;&quot;) return(NA_character_)
+
+  out &lt;- dplyr::case_when(
+    stringr::str_detect(t, &quot;ovarian&quot;) ~ &quot;Ovarian cancer&quot;,
+    stringr::str_detect(t, &quot;olaparib|rucaparib|niraparib&quot;) ~ &quot;Ovarian cancer&quot;,
+    stringr::str_detect(t, &quot;enfortumab|nephroureterectomy|cystoprostatectomy&quot;) ~ &quot;Urothelial carcinoma&quot;,
+    stringr::str_detect(t, &quot;rectum|abdominoperineal&quot;) ~ &quot;Rectal adenocarcinoma&quot;,
+    stringr::str_detect(t, &quot;oral cavity|skull base&quot;) ~ &quot;Head and neck squamous cell carcinoma&quot;,
+    stringr::str_detect(t, &quot;vulva|pelvic exenteration&quot;) ~ &quot;Cervical cancer&quot;,
+    stringr::str_detect(t, &quot;anal&quot;) ~ &quot;Anal squamous cell carcinoma&quot;,
+    stringr::str_detect(t, &quot;topotecan|gemcitabine&quot;) &amp;
+      stringr::str_detect(t, &quot;nivolumab|pembrolizumab|ipilimumab&quot;) ~ &quot;Urothelial carcinoma&quot;,
+    stringr::str_detect(t, &quot;carboplatin&quot;) &amp;
+      stringr::str_detect(t, &quot;taxol|paclitaxel&quot;) &amp;
+      stringr::str_detect(t, &quot;bevacizumab|doxil|atezolizumab&quot;) ~ &quot;Ovarian cancer&quot;,
+    stringr::str_detect(t, &quot;etoposide&quot;) &amp; stringr::str_detect(t, &quot;carboplatin&quot;) ~ &quot;Small cell carcinoma&quot;,
+    TRUE ~ NA_character_
+  )
+  if (is.na(out)) {
+    warning(&quot;Could not infer tumor type for study_id &quot;, study_id, call. = FALSE)
+    out &lt;- &quot;Not specified in REDCap export&quot;
+  }
+  out
+}
+
+# =============================================================================
+# R chunk: setup  (, include=FALSE)
+# =============================================================================
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, fig.width = 7, fig.height = 5)
+set.seed(123)
+
+suppressPackageStartupMessages({
+  library(here)
+  library(readr)
+  library(dplyr)
+  library(tidyr)
+  library(stringr)
+  library(lubridate)
+  library(ggplot2)
+  library(knitr)
+  library(kableExtra)
+  library(survival)
+  library(survminer)
+})
+
+# ---- Load REDCap export and label helpers ----
+source(here::here(&quot;scripts&quot;, &quot;protocol2101175_redcap_helpers.R&quot;))
+data_path &lt;- here::here(
+  &quot;data&quot;, &quot;clinical&quot;, &quot;protocol_2101175&quot;,
+  &quot;ProtocolNo2101175PRM_DATA_2026-05-18_2135.csv&quot;
+)
+raw &lt;- read_csv(data_path, show_col_types = FALSE)
+ctcae_term_map &lt;- load_ctcae_term_labels()
+
+# ---- Factor mappings (from REDCap companion script) ----
+# Safe recode: never assign a full vector into is.na(out) slots (avoids label corruption).
+map_chr &lt;- function(x, mapping) {
+  x_chr &lt;- as.character(x)
+  out &lt;- unname(mapping[x_chr])
+  unmatched &lt;- is.na(out) &amp; !is.na(x) &amp; x_chr != &quot;&quot;
+  if (any(unmatched)) {
+    out[unmatched] &lt;- paste0(&quot;Code &quot;, x_chr[unmatched])
+  }
+  out[is.na(x) | x_chr == &quot;&quot;] &lt;- NA_character_
+  out
+}
+
+# Stop knit if categorical table cells do not sum to the stated total N.
+assert_partition_sums &lt;- function(table_name, component_counts, total_n) {
+  comp &lt;- as.integer(component_counts)
+  if (any(is.na(comp))) {
+    stop(table_name, &quot;: missing component counts (NA).&quot;, call. = FALSE)
+  }
+  s &lt;- sum(comp)
+  if (s != total_n) {
+    stop(
+      sprintf(
+        &quot;%s: components (%s) sum to %d but total N = %d&quot;,
+        table_name,
+        paste(comp, collapse = &quot; + &quot;),
+        s,
+        total_n
+      ),
+      call. = FALSE
+    )
+  }
+  invisible(TRUE)
+}
+
+cohort_lab &lt;- c(
+  &quot;1&quot; = &quot;Cohort 1 low dose (0.6 mg BID)&quot;,
+  &quot;2&quot; = &quot;Cohort 1 high dose (0.6 mg TID)&quot;,
+  &quot;3&quot; = &quot;Cohort 2 (0.6 mg BID + nivolumab)&quot;
+)
+gender_lab &lt;- c(&quot;1&quot; = &quot;Male&quot;, &quot;2&quot; = &quot;Female&quot;, &quot;3&quot; = &quot;Other&quot;)
+race_lab &lt;- c(
+  &quot;1&quot; = &quot;Black&quot;, &quot;2&quot; = &quot;White&quot;, &quot;3&quot; = &quot;Asian&quot;, &quot;4&quot; = &quot;American Indian&quot;,
+  &quot;5&quot; = &quot;Hawaiian/Pacific Islander&quot;, &quot;6&quot; = &quot;Other/Unknown&quot;
+)
+ethnicity_lab &lt;- c(
+  &quot;1&quot; = &quot;Hispanic or Latino&quot;, &quot;2&quot; = &quot;NOT Hispanic or Latino&quot;, &quot;3&quot; = &quot;Unknown / Not Reported&quot;
+)
+ecog_lab &lt;- c(
+  &quot;0&quot; = &quot;0&quot;, &quot;1&quot; = &quot;1&quot;, &quot;2&quot; = &quot;2&quot;, &quot;3&quot; = &quot;3&quot;, &quot;4&quot; = &quot;4&quot;, &quot;-99&quot; = &quot;Not collected&quot;
+)
+enrolled_lab &lt;- c(&quot;0&quot; = &quot;No&quot;, &quot;1&quot; = &quot;Yes&quot;)
+status_lab &lt;- c(&quot;0&quot; = &quot;Alive&quot;, &quot;1&quot; = &quot;Dead&quot;, &quot;9&quot; = &quot;Lost to follow-up&quot;)
+ae_grade_lab &lt;- c(
+  &quot;1&quot; = &quot;1&quot;, &quot;2&quot; = &quot;2&quot;, &quot;3&quot; = &quot;3&quot;, &quot;4&quot; = &quot;4&quot;, &quot;5&quot; = &quot;5&quot;
+)
+sae_lab &lt;- c(&quot;0&quot; = &quot;No&quot;, &quot;1&quot; = &quot;Yes&quot;)
+attr_lab &lt;- c(
+  &quot;1&quot; = &quot;Unrelated&quot;, &quot;2&quot; = &quot;Unlikely&quot;, &quot;3&quot; = &quot;Possible&quot;, &quot;4&quot; = &quot;Probable&quot;, &quot;5&quot; = &quot;Definite&quot;, &quot;6&quot; = &quot;N/A&quot;
+)
+
+dat &lt;- raw %&gt;%
   mutate(
-    baseline_crp = cycle_1_day_1_arm_1,
-    post_min_crp = pmin(cycle_1_day_8_arm_1, cycle_1_day_15_arm_1, na.rm = TRUE),
-    max_crp_decline_pct = 100 * (baseline_crp - post_min_crp) / baseline_crp
+    study_id = as.integer(study_id),
+    cohort_label = map_chr(cohort, cohort_lab),
+    gender_label = map_chr(gender, gender_lab),
+    race_label = map_chr(race, race_lab),
+    ethnicity_label = map_chr(ethnicity, ethnicity_lab),
+    enrolled_label = map_chr(was_the_subject_enrolled, enrolled_lab),
+    ecog_label = map_chr(ecog_performance_status, ecog_lab),
+    subject_status_label = map_chr(subject_status_2, status_lab),
+    ae_grade_label = map_chr(aegrade, ae_grade_lab),
+    sae_label = map_chr(is_this_a_sae, sae_lab),
+    ae_attribution_label = map_chr(ae_attribution_colchicine, attr_lab),
+    crp_value = suppressWarnings(as.numeric(c_reactive_protein_value)),
+    ferritin_value_num = suppressWarnings(as.numeric(ferritin_value)),
+    esr_value_num = suppressWarnings(as.numeric(erythrocyte_sedimentation_value)),
+    date_of_birth_dt = suppressWarnings(ymd(date_of_birth)),
+    date_enrollment_dt = suppressWarnings(ymd(date_of_enrollment)),
+    date_final_status_dt = suppressWarnings(ymd(date_of_final_status)),
+    treatment_start_dt = suppressWarnings(ymd(treatment_start_date))
+  )
+
+# ---- Cohort / visit helpers ----
+baseline_events &lt;- c(
+  &quot;cycle_1_day_1__3_d_arm_1&quot;, &quot;cycle_1_day_1_arm_2&quot;, &quot;cycle_1_day_1_arm_3&quot;
+)
+post_baseline_events &lt;- c(
+  &quot;cycle_1_day_15__3_arm_1&quot;,
+  &quot;cycle_1_day_8_arm_2&quot;, &quot;cycle_1_day_15_arm_2&quot;,
+  &quot;cycle_1_day_8_arm_3&quot;, &quot;cycle_1_day_15_arm_3&quot;
+)
+screening_events &lt;- c(&quot;screening_28_days_arm_1&quot;, &quot;screening_arm_2&quot;, &quot;screening_arm_3&quot;)
+
+screen_disposition &lt;- build_protocol2101175_screen_disposition(dat)
+consented_ids &lt;- screen_disposition %&gt;%
+  filter(!is.na(consent_date)) %&gt;%
+  pull(study_id) %&gt;%
+  sort()
+enrolled_ids &lt;- screen_disposition %&gt;%
+  filter(enrolled) %&gt;%
+  pull(study_id) %&gt;%
+  sort()
+screen_fail_ids &lt;- screen_disposition %&gt;%
+  filter(screen_fail) %&gt;%
+  pull(study_id) %&gt;%
+  sort()
+
+consented_n &lt;- length(consented_ids)
+enrolled_n &lt;- length(enrolled_ids)
+screen_fail_n &lt;- length(screen_fail_ids)
+screened_n &lt;- consented_n
+
+assert_partition_sums(
+  &quot;Accrual disposition (consented vs enrolled + screen-fail)&quot;,
+  c(enrolled_n, screen_fail_n),
+  consented_n
+)
+
+screen_fail_summary &lt;- summarise_screen_fail_reasons(screen_disposition)
+
+# ---- Primary endpoint: max % CRP decline ----
+crp_long &lt;- dat %&gt;%
+  filter(study_id %in% enrolled_ids, !is.na(crp_value)) %&gt;%
+  select(study_id, redcap_event_name, crp_value, cohort_label) %&gt;%
+  distinct()
+
+derive_crp_endpoint &lt;- function(id, d_long) {
+  sub &lt;- d_long %&gt;% filter(study_id == id)
+  base_row &lt;- sub %&gt;%
+    filter(redcap_event_name %in% baseline_events) %&gt;%
+    arrange(redcap_event_name) %&gt;%
+    slice(1)
+  if (nrow(base_row) == 0) {
+    base_row &lt;- sub %&gt;%
+      filter(redcap_event_name %in% screening_events) %&gt;%
+      arrange(redcap_event_name) %&gt;%
+      slice(1)
+  }
+  if (nrow(base_row) == 0) return(NULL)
+  baseline &lt;- base_row$crp_value[1]
+  if (is.na(baseline) || baseline &lt;= 0) return(NULL)
+  post &lt;- sub %&gt;%
+    filter(redcap_event_name %in% post_baseline_events) %&gt;%
+    pull(crp_value)
+  if (length(post) == 0) return(NULL)
+  # Decline cannot be negative by definition; increases contribute 0% decline.
+  pct_declines &lt;- pmax(100 * (baseline - post) / baseline, 0)
+  tibble(
+    study_id = id,
+    baseline_crp_mg_l = baseline,
+    min_on_tx_crp_mg_l = min(post),
+    max_pct_decline = max(pct_declines),
+    n_crp_on_tx = length(post)
+  )
+}
+
+crp_endpoint &lt;- bind_rows(lapply(enrolled_ids, derive_crp_endpoint, crp_long))
+evaluable_efficacy_n &lt;- nrow(crp_endpoint)
+evaluable_toxicity_n &lt;- enrolled_n
+
+# Primary one-sided t-test (protocol: alpha = 0.025 for Cohort 1 low dose)
+primary_test &lt;- if (evaluable_efficacy_n &gt;= 2) {
+  t.test(crp_endpoint$max_pct_decline, mu = 0, alternative = &quot;greater&quot;)
+} else {
+  NULL
+}
+
+primary_mean &lt;- mean(crp_endpoint$max_pct_decline, na.rm = TRUE)
+primary_sd &lt;- sd(crp_endpoint$max_pct_decline, na.rm = TRUE)
+primary_p &lt;- if (!is.null(primary_test)) primary_test$p.value else NA_real_
+primary_t &lt;- if (!is.null(primary_test)) primary_test$statistic else NA_real_
+primary_ci_low &lt;- if (!is.null(primary_test)) primary_test$conf.int[1] else NA_real_
+
+# ---- Patient-level master (one row per enrolled subject) ----
+# Demographics from screening visit; first non-missing value per field (not first table row).
+patient_master &lt;- tibble(study_id = enrolled_ids) %&gt;%
+  left_join(
+    dat %&gt;%
+      filter(study_id %in% enrolled_ids, redcap_event_name %in% screening_events) %&gt;%
+      group_by(study_id) %&gt;%
+      summarise(
+        gender_code = suppressWarnings(as.integer(first(na.omit(gender)))),
+        race_code = suppressWarnings(as.integer(first(na.omit(race)))),
+        ethnicity_code = suppressWarnings(as.integer(first(na.omit(ethnicity)))),
+        ecog_code = suppressWarnings(as.integer(first(na.omit(ecog_performance_status)))),
+        date_of_birth_dt = first(na.omit(date_of_birth_dt)),
+        date_enrollment_dt = first(na.omit(date_enrollment_dt)),
+        cohort_code = suppressWarnings(as.integer(first(na.omit(cohort)))),
+        .groups = &quot;drop&quot;
+      ),
+    by = &quot;study_id&quot;
   ) %&gt;%
-  filter(!is.na(max_crp_decline_pct), is.finite(max_crp_decline_pct))
+  mutate(
+    gender_label = map_chr(gender_code, gender_lab),
+    race_label = map_chr(race_code, race_lab),
+    ethnicity_label = map_chr(ethnicity_code, ethnicity_lab),
+    ecog_label = map_chr(ecog_code, ecog_lab),
+    cohort_label = map_chr(cohort_code, cohort_lab),
+    age_years = if_else(
+      !is.na(date_of_birth_dt) &amp; !is.na(date_enrollment_dt),
+      as.numeric(interval(date_of_birth_dt, date_enrollment_dt) / years(1)),
+      NA_real_
+    )
+  )
 
-# Prespecified one-sided one-sample t-test (H0: mean decline = 0), alpha = 0.025
-primary_test &lt;- t.test(crp_eval$max_crp_decline_pct, mu = 0, alternative = &quot;greater&quot;)
-primary_test  # mean 22.6%, SD 32.9%, t = 1.94, p = 0.047 (N = 8 evaluable)
+if (nrow(patient_master) != enrolled_n) {
+  stop(&quot;patient_master row count does not match enrolled_n.&quot;, call. = FALSE)
+}
 
-# --- Exploratory Kaplan-Meier PFS/OS (not powered) ---
-# PFS event: RECIST PD or discontinuation for progression
-# OS event: death from any cause
+baseline &lt;- patient_master
 
-pfs_os &lt;- dat %&gt;%
+# Prior therapies → therapy class (repeat instrument)
+prior_tx &lt;- dat %&gt;%
+  filter(
+    study_id %in% enrolled_ids,
+    redcap_repeat_instrument == &quot;prior_treatment_therapy&quot;,
+    prior_treatment_therapies != &quot;&quot;
+  ) %&gt;%
+  distinct(study_id, prior_treatment_therapies, therapy_start_date) %&gt;%
+  mutate(therapy_class = classify_prior_therapy(prior_treatment_therapies))
+
+therapy_class_levels &lt;- c(
+  &quot;Chemotherapy&quot;,
+  &quot;Immunotherapy&quot;,
+  &quot;Targeted therapy&quot;,
+  &quot;Radiation therapy&quot;,
+  &quot;Surgery&quot;,
+  &quot;Other&quot;
+)
+
+therapy_class_levels_table1 &lt;- c(
+  &quot;Chemotherapy&quot;,
+  &quot;Immunotherapy&quot;,
+  &quot;Targeted therapy&quot;,
+  &quot;Radiation therapy&quot;,
+  &quot;Surgery&quot;
+)
+
+prior_tx_by_patient &lt;- prior_tx %&gt;%
+  distinct(study_id, therapy_class) %&gt;%
+  filter(!is.na(therapy_class)) %&gt;%
+  mutate(received = TRUE) %&gt;%
+  pivot_wider(
+    names_from = therapy_class,
+    values_from = received,
+    values_fill = list(received = FALSE)
+  )
+
+for (col in therapy_class_levels) {
+  if (!col %in% names(prior_tx_by_patient)) {
+    prior_tx_by_patient[[col]] &lt;- FALSE
+  }
+}
+
+prior_tx_summary &lt;- prior_tx %&gt;%
+  group_by(therapy_class) %&gt;%
+  summarise(
+    `N patients` = n_distinct(study_id),
+    `N regimen entries` = n(),
+    .groups = &quot;drop&quot;
+  ) %&gt;%
+  arrange(desc(`N patients`))
+
+# Primary tumor type (inferred from prior therapy / surgery text in REDCap)
+tumor_by_patient &lt;- prior_tx %&gt;%
   group_by(study_id) %&gt;%
   summarise(
-    pfs_time_months = first(pfs_months),
-    pfs_event = first(as.integer(pfs_event_flag)),
-    os_time_months = first(os_months),
-    os_event = first(as.integer(os_event_flag)),
+    primary_tumor_type = infer_primary_tumor_type(
+      study_id[1],
+      prior_treatment_therapies
+    ),
     .groups = &quot;drop&quot;
   )
 
-fit_pfs &lt;- survfit(Surv(pfs_time_months, pfs_event) ~ 1, data = pfs_os)
-fit_os  &lt;- survfit(Surv(os_time_months, os_event) ~ 1, data = pfs_os)
-summary(fit_pfs)
-summary(fit_os)
+patient_master &lt;- patient_master %&gt;%
+  left_join(tumor_by_patient, by = &quot;study_id&quot;)
 
-# Post-hoc power for observed primary effect (N = 8, alpha = 0.025 one-sided)
-pwr::power.t.test(n = 8, delta = 22.6 / 32.9, sd = 1, sig.level = 0.025, type = &quot;one.sample&quot;, alternative = &quot;one.sided&quot;)
+# Systemic therapy line count approximation:
+# collapse same-date combinations into one regimen line and exclude RT/surgery/other.
+prior_systemic_lines &lt;- prior_tx %&gt;%
+  filter(therapy_class %in% c(&quot;Chemotherapy&quot;, &quot;Immunotherapy&quot;, &quot;Targeted therapy&quot;)) %&gt;%
+  mutate(systemic_start_date = suppressWarnings(ymd(therapy_start_date))) %&gt;%
+  group_by(study_id) %&gt;%
+  summarise(
+    n_systemic_lines = if_else(
+      any(!is.na(systemic_start_date)),
+      n_distinct(systemic_start_date[!is.na(systemic_start_date)]),
+      n_distinct(prior_treatment_therapies)
+    ),
+    .groups = &quot;drop&quot;
+  ) %&gt;%
+  right_join(tibble(study_id = enrolled_ids), by = &quot;study_id&quot;) %&gt;%
+  mutate(n_systemic_lines = replace_na(n_systemic_lines, 0L))
+
+tumor_type_summary &lt;- patient_master %&gt;%
+  count(primary_tumor_type, name = &quot;N&quot;) %&gt;%
+  arrange(desc(N)) %&gt;%
+  mutate(
+    `Cancer type (patient-level)` = paste0(primary_tumor_type, &quot; (n = &quot;, N, &quot;)&quot;)
+  )
+
+assert_partition_sums(
+  &quot;Patient characteristics: primary cancer type&quot;,
+  tumor_type_summary$N,
+  enrolled_n
+)
+
+# ---- Adverse events ----
+# TRAE-only: attribution to colchicine is Possible / Probable / Definite.
+ae_all &lt;- dat %&gt;%
+  filter(
+    study_id %in% enrolled_ids,
+    ae_term_ctcaev5 != &quot;&quot;,
+    ae_attribution_colchicine %in% c(3, 4, 5)
+  ) %&gt;%
+  mutate(
+    ae_grade_num = suppressWarnings(as.numeric(aegrade)),
+    ae_term_display = ctcae_term_label(ae_term_ctcaev5, ctcae_term_map),
+    ae_other_text = if (&quot;if_you_entered_other_pleas&quot; %in% names(.))
+      trimws(as.character(if_you_entered_other_pleas))
+    else
+      NA_character_
+  ) %&gt;%
+  mutate(
+    ae_term_display = if_else(
+      !is.na(ae_other_text) &amp; ae_other_text != &quot;&quot; &amp;
+        (is.na(ae_term_display) |
+          stringr::str_detect(tolower(ae_term_display), &quot;^other|not elsewhere classified&quot;)),
+      ae_other_text,
+      ae_term_display
+    )
+  )
+
+ae_by_term_grade &lt;- ae_all %&gt;%
+  count(ae_term_display, ae_grade_label, name = &quot;n&quot;) %&gt;%
+  arrange(desc(n))
+
+# Worst CTCAE grade per patient per preferred term (do not count lower grades separately).
+ae_worst_per_patient &lt;- ae_all %&gt;%
+  filter(!is.na(ae_grade_num)) %&gt;%
+  group_by(study_id, ae_term_display) %&gt;%
+  slice_max(ae_grade_num, n = 1, with_ties = FALSE) %&gt;%
+  ungroup()
+
+ae_by_term_grade_patient &lt;- ae_worst_per_patient %&gt;%
+  count(ae_term_display, ae_grade_label, name = &quot;N patients&quot;) %&gt;%
+  mutate(`N (%)` = paste0(`N patients`, &quot; (&quot;, sprintf(&quot;%.1f&quot;, 100 * `N patients` / enrolled_n), &quot;%)&quot;)) %&gt;%
+  arrange(desc(`N patients`), ae_term_display, suppressWarnings(as.numeric(ae_grade_label)))
+
+ae_any_grade &lt;- ae_all %&gt;%
+  distinct(study_id, ae_term_display) %&gt;%
+  count(study_id, name = &quot;n_aes&quot;) %&gt;%
+  right_join(tibble(study_id = enrolled_ids), by = &quot;study_id&quot;) %&gt;%
+  mutate(n_aes = replace_na(n_aes, 0L))
+
+grade3plus_rate &lt;- ae_worst_per_patient %&gt;%
+  filter(ae_grade_num &gt;= 3) %&gt;%
+  distinct(study_id) %&gt;%
+  nrow() / enrolled_n * 100
+
+# Helpers for inline text (also used in survival tables)
+fmt_p &lt;- function(p) {
+  if (is.na(p)) return(&quot;NA&quot;)
+  if (p &lt; 0.001) return(&quot;&lt;0.001&quot;)
+  format(round(p, 3), nsmall = 3)
+}
+fmt_num &lt;- function(x, digits = 1) format(round(x, digits), nsmall = digits)
+
+.tbl_n &lt;- 0L
+.fig_n &lt;- 0L
+tbl_cap &lt;- function(title) {
+  .tbl_n &lt;&lt;- .tbl_n + 1L
+  paste0(&quot;Table &quot;, .tbl_n, &quot;. &quot;, title)
+}
+fig_cap &lt;- function(title) {
+  .fig_n &lt;&lt;- .fig_n + 1L
+  paste0(&quot;Figure &quot;, .fig_n, &quot;. &quot;, title)
+}
+
+# ---- Survival / status (PFS/OS derived from RECIST, discontinuation, final status) ----
+surv_dat &lt;- build_protocol2101175_survival(dat, enrolled_ids)
+
+status_tbl &lt;- surv_dat %&gt;%
+  transmute(
+    study_id,
+    status = coalesce(final_status, &quot;Not recorded&quot;),
+    date_final = if_else(os_event, death_date, os_end_date)
+  )
+
+n_dead &lt;- sum(surv_dat$os_event, na.rm = TRUE)
+n_pfs_events &lt;- sum(surv_dat$pfs_event, na.rm = TRUE)
+
+surv_pfs &lt;- surv_dat %&gt;%
+  filter(!is.na(pfs_months), pfs_months &gt;= 0)
+
+surv_os &lt;- surv_dat %&gt;%
+  filter(!is.na(os_months), os_months &gt;= 0)
+
+fit_pfs &lt;- if (nrow(surv_pfs) &gt;= 3 &amp;&amp; sum(surv_pfs$pfs_event) &gt;= 1) {
+  survfit(Surv(pfs_months, pfs_event) ~ 1, data = surv_pfs)
+} else {
+  NULL
+}
+
+fit_os &lt;- if (nrow(surv_os) &gt;= 3 &amp;&amp; sum(surv_os$os_event) &gt;= 1) {
+  survfit(Surv(os_months, os_event) ~ 1, data = surv_os)
+} else {
+  NULL
+}
+
+median_surv_months &lt;- function(fit) {
+  if (is.null(fit)) return(list(median = NA_real_, lcl = NA_real_, ucl = NA_real_))
+  s &lt;- summary(fit)$table
+  if (is.matrix(s)) {
+    list(
+      median = unname(s[1, &quot;median&quot;]),
+      lcl = unname(s[1, &quot;0.95LCL&quot;]),
+      ucl = unname(s[1, &quot;0.95UCL&quot;])
+    )
+  } else {
+    list(median = NA_real_, lcl = NA_real_, ucl = NA_real_)
+  }
+}
+
+pfs_med &lt;- median_surv_months(fit_pfs)
+os_med &lt;- median_surv_months(fit_os)
+
+pfs_os_tbl &lt;- surv_dat %&gt;%
+  transmute(
+    `Study ID` = study_id,
+    `Index date` = as.character(time_zero),
+    `Best RECIST on study` = coalesce(best_recist, &quot;Not assessed&quot;),
+    `PFS event` = if_else(pfs_event, &quot;Progression&quot;, &quot;Censored&quot;),
+    `PFS date` = as.character(pfs_end_date),
+    `PFS (months)` = fmt_num(pfs_months, 1),
+    `OS event` = if_else(os_event, &quot;Death&quot;, &quot;Censored&quot;),
+    `OS date` = as.character(os_end_date),
+    `OS (months)` = fmt_num(os_months, 1),
+    `Final status` = coalesce(final_status, &quot;Not recorded&quot;)
+  )
+
+ctr_table_style &lt;- function(kbl) {
+  kbl %&gt;%
+    kable_styling(bootstrap_options = c(&quot;striped&quot;, &quot;hover&quot;), full_width = FALSE) %&gt;%
+    row_spec(0, bold = TRUE, background = &quot;#D9E2F3&quot;)
+}
+
+# =============================================================================
+# R chunk: trial-info-table  ()
+# =============================================================================
+trial_info &lt;- tibble(
+  Field = c(
+    &quot;Disease&quot;,
+    &quot;Stage of disease / treatment&quot;,
+    &quot;Prior therapy&quot;,
+    &quot;Type of study&quot;,
+    &quot;Primary endpoint&quot;,
+    &quot;Secondary endpoints&quot;,
+    &quot;Additional details&quot;
+  ),
+  Description = c(
+    &quot;Advanced/recurrent solid tumors (Cohort 1); resected high-risk urothelial carcinoma planned for adjuvant nivolumab (Cohort 2, closed to accrual)&quot;,
+    &quot;Metastatic/recurrent solid tumors (Cohort 1); post-surgical high-risk urothelial carcinoma (Cohort 2, not enrolled)&quot;,
+    &quot;Variable prior systemic and local therapy per disease (see Patient Characteristics)&quot;,
+    &quot;Single-center, open-label, non-randomized pilot&quot;,
+    &quot;Maximum percentage decline in peripheral blood CRP from cycle 1 day 1 during on-study colchicine&quot;,
+    &quot;CTCAE v5.0 safety; PFS (Cohort 1); DFS/OS (Cohort 2); exploratory cytokines, ctDNA, tissue correlatives&quot;,
+    &quot;Cohort 1 low-dose (BID) and high-dose (TID) were sequential; only low-dose enrolled. Cohort 2 closed for poor accrual before enrollment.&quot;
+  )
+)
+trial_info %&gt;%
+  kbl(
+    caption = tbl_cap(&quot;Trial information.&quot;),
+    col.names = c(&quot;Trial information&quot;, &quot;Description&quot;),
+    align = c(&quot;l&quot;, &quot;l&quot;)
+  ) %&gt;%
+  ctr_table_style()
+
+# =============================================================================
+# R chunk: drug-info-table  ()
+# =============================================================================
+drug_info &lt;- tibble(
+  `Drug information` = c(
+    &quot;Generic/working name&quot;, &quot;Drug type&quot;, &quot;Drug class&quot;, &quot;Dose (Cohort 1 low)&quot;,
+    &quot;Dose (Cohort 1 high)&quot;, &quot;Dose (Cohort 2)&quot;, &quot;Route&quot;, &quot;Schedule&quot;
+  ),
+  Details = c(
+    &quot;Colchicine&quot;, &quot;Anti-inflammatory alkaloid&quot;, &quot;Microtubule polymerization inhibitor (indirect NLRP3 pathway modulation)&quot;,
+    &quot;0.6 mg oral BID × 14 days&quot;, &quot;0.6 mg oral TID × 14 days (not enrolled)&quot;,
+    &quot;0.6 mg oral BID × 28 days with nivolumab 480 mg IV every 4 weeks (cohort closed)&quot;,
+    &quot;Oral&quot;, &quot;One cycle per protocol; missed doses not doubled&quot;
+  )
+)
+drug_info %&gt;%
+  kbl(
+    caption = tbl_cap(&quot;Drug information.&quot;),
+    col.names = c(&quot;Drug information&quot;, &quot;Details&quot;),
+    align = c(&quot;l&quot;, &quot;l&quot;)
+  ) %&gt;%
+  ctr_table_style()
+
+# =============================================================================
+# R chunk: primary-assessment-table  ()
+# =============================================================================
+primary_assess &lt;- tibble(
+  `Primary assessment` = c(
+    &quot;Title&quot;,
+    &quot;Number of patients who signed informed consent&quot;,
+    &quot;Number of patients enrolled&quot;,
+    &quot;Number of screen failures before enrollment&quot;,
+    &quot;Number evaluable for toxicity&quot;,
+    &quot;Number evaluable for primary efficacy (CRP)&quot;,
+    &quot;Evaluation method&quot;,
+    &quot;Primary analysis result (Cohort 1 low dose)&quot;
+  ),
+  Value = c(
+    &quot;Maximum percent decline in CRP from baseline (cycle 1 day 1) during post-baseline C1 on-treatment visits&quot;,
+    as.character(consented_n),
+    as.character(enrolled_n),
+    as.character(screen_fail_n),
+    as.character(evaluable_toxicity_n),
+    as.character(evaluable_efficacy_n),
+    &quot;Peripheral blood CRP (mg/L) at protocol C1 visits; baseline = cycle 1 day 1 (or screening fallback if missing); minimum post-baseline value at C1D8/C1D15 used for maximum decline. Cycle 2 values excluded from primary endpoint per protocol treatment window.&quot;,
+    paste0(
+      &quot;Mean max decline &quot;, fmt_num(primary_mean), &quot;% (SD &quot;, fmt_num(primary_sd), &quot;%); &quot;,
+      &quot;one-sided one-sample t-test vs 0, t = &quot;, fmt_num(primary_t, 2), &quot;, p = &quot;, fmt_p(primary_p),
+      &quot; (prespecified α = 0.025)&quot;
+    )
+  )
+)
+primary_assess %&gt;%
+  kbl(
+    caption = tbl_cap(&quot;Primary assessment method.&quot;),
+    col.names = c(&quot;Primary assessment&quot;, &quot;Value&quot;),
+    align = c(&quot;l&quot;, &quot;l&quot;)
+  ) %&gt;%
+  ctr_table_style()
+
+# =============================================================================
+# R chunk: accrual-disposition-table  ()
+# =============================================================================
+accrual_overview &lt;- tibble(
+  Disposition = c(
+    &quot;Signed informed consent&quot;,
+    &quot;Enrolled on study&quot;,
+    &quot;Screen failure before enrollment&quot;
+  ),
+  N = c(consented_n, enrolled_n, screen_fail_n)
+) %&gt;%
+  mutate(`N (%)` = if_else(
+    Disposition == &quot;Signed informed consent&quot;,
+    as.character(N),
+    paste0(N, &quot; (&quot;, trimws(fmt_num(100 * N / consented_n, 1)), &quot;% of consented)&quot;)
+  ))
+
+accrual_overview %&gt;%
+  kbl(
+    caption = tbl_cap(&quot;Accrual disposition among consented subjects.&quot;),
+    col.names = c(&quot;Disposition&quot;, &quot;N&quot;, &quot;N (%)&quot;),
+    align = c(&quot;l&quot;, &quot;r&quot;, &quot;r&quot;)
+  ) %&gt;%
+  ctr_table_style()
+
+if (nrow(screen_fail_summary) &gt; 0) {
+  screen_fail_summary %&gt;%
+    mutate(
+      `N (%)` = paste0(`N`, &quot; (&quot;, trimws(fmt_num(100 * `N` / consented_n, 1)), &quot;% of consented)&quot;)
+    ) %&gt;%
+    select(`Screen-failure reason`, N, `N (%)`, Details) %&gt;%
+    kbl(
+      caption = tbl_cap(&quot;Reasons for screen failure before enrollment.&quot;),
+      col.names = c(&quot;Screen-failure reason&quot;, &quot;N&quot;, &quot;N (%)&quot;, &quot;Details&quot;),
+      align = c(&quot;l&quot;, &quot;r&quot;, &quot;r&quot;, &quot;l&quot;)
+    ) %&gt;%
+    ctr_table_style()
+}
+
+if (screen_fail_n &gt; 0) {
+  screen_disposition %&gt;%
+    filter(screen_fail) %&gt;%
+    transmute(
+      `Consent date` = format(consent_date, &quot;%Y-%m-%d&quot;),
+      `Screen-failure reason` = screen_fail_reason,
+      Details = screen_fail_detail
+    ) %&gt;%
+    kbl(
+      caption = tbl_cap(&quot;Screen-failure subjects: reason and supporting detail.&quot;),
+      col.names = c(&quot;Consent date&quot;, &quot;Screen-failure reason&quot;, &quot;Details&quot;),
+      align = c(&quot;l&quot;, &quot;l&quot;, &quot;l&quot;)
+    ) %&gt;%
+    ctr_table_style()
+}
+
+# =============================================================================
+# R chunk: patient-chars-table  ()
+# =============================================================================
+n_male &lt;- sum(patient_master$gender_label == &quot;Male&quot;, na.rm = TRUE)
+n_female &lt;- sum(patient_master$gender_label == &quot;Female&quot;, na.rm = TRUE)
+n_sex_other &lt;- sum(patient_master$gender_label == &quot;Other&quot;, na.rm = TRUE)
+n_sex_unknown &lt;- sum(is.na(patient_master$gender_label), na.rm = TRUE)
+
+assert_partition_sums(
+  &quot;Patient characteristics: sex&quot;,
+  c(n_male, n_female, n_sex_other, n_sex_unknown),
+  enrolled_n
+)
+
+ecog01 &lt;- sum(patient_master$ecog_code %in% c(0, 1), na.rm = TRUE)
+ecog2p &lt;- sum(patient_master$ecog_code %in% c(2, 3, 4), na.rm = TRUE)
+ecog_unknown &lt;- enrolled_n - ecog01 - ecog2p
+
+assert_partition_sums(
+  &quot;Patient characteristics: ECOG&quot;,
+  c(ecog01, ecog2p, ecog_unknown),
+  enrolled_n
+)
+
+age_vec &lt;- patient_master$age_years[!is.na(patient_master$age_years)]
+age_med &lt;- if (length(age_vec)) median(age_vec) else NA_real_
+age_rng &lt;- if (length(age_vec)) range(age_vec) else c(NA_real_, NA_real_)
+n_age_known &lt;- length(age_vec)
+
+prior_med &lt;- median(prior_systemic_lines$n_systemic_lines, na.rm = TRUE)
+prior_rng &lt;- range(prior_systemic_lines$n_systemic_lines, na.rm = TRUE)
+
+fmt_n_pct &lt;- function(n, d = enrolled_n) paste0(n, &quot; (&quot;, trimws(fmt_num(100 * n / d, 1)), &quot;%)&quot;)
+
+tumor_type_rows &lt;- tumor_type_summary %&gt;%
+  mutate(
+    `Patient characteristics` = paste0(&quot;  &quot;, primary_tumor_type, &quot;, n (%)&quot;),
+    Value = fmt_n_pct(N)
+  ) %&gt;%
+  select(`Patient characteristics`, Value)
+
+therapy_class_rows &lt;- tibble(therapy_class = therapy_class_levels_table1) %&gt;%
+  left_join(
+    prior_tx %&gt;%
+      group_by(therapy_class) %&gt;%
+      summarise(`N patients` = n_distinct(study_id), .groups = &quot;drop&quot;),
+    by = &quot;therapy_class&quot;
+  ) %&gt;%
+  mutate(`N patients` = replace_na(`N patients`, 0L)) %&gt;%
+  mutate(
+    `Patient characteristics` = paste0(&quot;  &quot;, therapy_class, &quot;, n (%)&quot;),
+    Value = fmt_n_pct(`N patients`)
+  ) %&gt;%
+  select(`Patient characteristics`, Value)
+
+pat_chars &lt;- bind_rows(
+  tibble(
+    `Patient characteristics` = c(
+      &quot;Number enrolled (Cohort 1 low dose)&quot;,
+      &quot;Sex, male, n (%)&quot;,
+      &quot;Sex, female, n (%)&quot;,
+      &quot;Age at enrollment, median (range), years&quot;,
+      &quot;Performance status ECOG 0–1, n (%)&quot;,
+      &quot;Performance status ECOG ≥2, n (%)&quot;,
+      &quot;Prior systemic therapy lines, median (range), n&quot;
+    ),
+    Value = c(
+      as.character(enrolled_n),
+      fmt_n_pct(n_male),
+      fmt_n_pct(n_female),
+      if (n_age_known == 0) {
+        &quot;Not available&quot;
+      } else {
+        paste0(
+          fmt_num(age_med, 0), &quot; (&quot;, fmt_num(age_rng[1], 0), &quot;–&quot;, fmt_num(age_rng[2], 0), &quot;)&quot;
+        )
+      },
+      fmt_n_pct(ecog01),
+      fmt_n_pct(ecog2p),
+      if (length(prior_med) == 0 || is.na(prior_med)) {
+        &quot;Not available&quot;
+      } else {
+        paste0(prior_med, &quot; (&quot;, prior_rng[1], &quot;–&quot;, prior_rng[2], &quot;)&quot;)
+      }
+    )
+  ),
+  tibble(`Patient characteristics` = &quot;Exact tumor type&quot;, Value = &quot;&quot;),
+  tumor_type_rows,
+  tibble(`Patient characteristics` = &quot;Prior therapy class (N patients)&quot;, Value = &quot;&quot;),
+  therapy_class_rows
+)
+pat_chars %&gt;%
+  kbl(
+    caption = tbl_cap(&quot;Patient characteristics (Cohort 1 low dose).&quot;),
+    col.names = c(&quot;Characteristic&quot;, &quot;Value&quot;),
+    align = c(&quot;l&quot;, &quot;l&quot;)
+  ) %&gt;%
+  ctr_table_style()
+
+# =============================================================================
+# R chunk: crp-endpoint-table  ()
+# =============================================================================
+crp_endpoint %&gt;%
+  mutate(
+    baseline_crp_mg_l = round(baseline_crp_mg_l, 1),
+    min_on_tx_crp_mg_l = round(min_on_tx_crp_mg_l, 1),
+    max_pct_decline = round(max_pct_decline, 1)
+  ) %&gt;%
+  rename(
+    `Study ID` = study_id,
+    `Baseline CRP (mg/L)` = baseline_crp_mg_l,
+    `Lowest on-treatment CRP (mg/L)` = min_on_tx_crp_mg_l,
+    `Max % decline` = max_pct_decline,
+    `N on-tx CRP values` = n_crp_on_tx
+  ) %&gt;%
+  kbl(caption = tbl_cap(&quot;Primary CRP endpoint derivation by enrolled patient.&quot;)) %&gt;%
+  ctr_table_style()
+
+# =============================================================================
+# R chunk: waterfall-plot  (, fig.cap=fig_cap(&quot;Maximum percent decline in C-reactive protein (CRP) from baseline during on-treatment assessment by enrolled patient (Cohort 1 low dose). Abbreviations: CRP, C-reactive protein.&quot;))
+# =============================================================================
+if (nrow(crp_endpoint) &gt; 0) {
+  crp_endpoint %&gt;%
+    mutate(study_id = factor(study_id)) %&gt;%
+    ggplot(aes(x = reorder(study_id, max_pct_decline), y = max_pct_decline)) +
+    geom_col(fill = &quot;#2C6FAC&quot;) +
+    geom_hline(yintercept = 0, linewidth = 0.3) +
+    coord_flip() +
+    labs(
+      x = &quot;Study ID&quot;,
+      y = &quot;Maximum CRP decline (%)&quot;
+    ) +
+    theme_minimal(base_size = 12)
+} else {
+  plot.new()
+  text(0.5, 0.5, &quot;No evaluable CRP endpoint data&quot;)
+}
+
+# =============================================================================
+# R chunk: crp-longitudinal-plot  (, fig.width = 9, fig.height = 11, fig.cap = fig_cap(&quot;Longitudinal peripheral blood CRP (mg/L) across protocol C1 visits (baseline C1D1 and post-baseline C1D8/C1D15) for enrolled patients with serial C1 values. Abbreviations: CRP, C-reactive protein.&quot;))
+# =============================================================================
+crp_plot &lt;- crp_long %&gt;%
+  mutate(
+    visit = case_when(
+      redcap_event_name %in% c(&quot;cycle_1_day_1__3_d_arm_1&quot;, &quot;cycle_1_day_1_arm_2&quot;, &quot;cycle_1_day_1_arm_3&quot;) ~ &quot;C1D1&quot;,
+      redcap_event_name %in% c(&quot;cycle_1_day_8_arm_2&quot;, &quot;cycle_1_day_8_arm_3&quot;) ~ &quot;C1D8&quot;,
+      redcap_event_name %in% c(&quot;cycle_1_day_15__3_arm_1&quot;, &quot;cycle_1_day_15_arm_2&quot;, &quot;cycle_1_day_15_arm_3&quot;) ~ &quot;C1D15&quot;,
+      TRUE ~ NA_character_
+    ),
+    study_id = factor(study_id),
+    visit = factor(visit, levels = c(&quot;C1D1&quot;, &quot;C1D8&quot;, &quot;C1D15&quot;))
+  ) %&gt;%
+  filter(!is.na(visit)) %&gt;%
+  group_by(study_id, visit) %&gt;%
+  summarise(crp_value = median(crp_value, na.rm = TRUE), .groups = &quot;drop&quot;) %&gt;%
+  group_by(study_id) %&gt;%
+  filter(n_distinct(visit) &gt;= 2, any(visit %in% c(&quot;C1D8&quot;, &quot;C1D15&quot;))) %&gt;%
+  ungroup()
+
+if (nrow(crp_plot) &gt; 0) {
+  ggplot(crp_plot, aes(x = visit, y = crp_value, group = study_id, color = study_id)) +
+    geom_line(linewidth = 1.1, alpha = 0.85) +
+    geom_point(size = 3.5) +
+    scale_y_continuous(expand = expansion(mult = c(0.02, 0.06)), breaks = scales::pretty_breaks(n = 14)) +
+    labs(x = &quot;Visit&quot;, y = &quot;CRP (mg/L)&quot;, color = &quot;Study ID&quot;) +
+    theme_minimal(base_size = 13) +
+    theme(legend.position = &quot;right&quot;)
+} else {
+  plot.new()
+  text(0.5, 0.5, &quot;No CRP longitudinal data&quot;)
+}
+
+# =============================================================================
+# R chunk: toxicity-ae-patient-incidence  (, eval=nrow(ae_by_term_grade_patient) &gt; 0)
+# =============================================================================
+ae_by_term_grade_patient %&gt;%
+  rename(`Adverse event (CTCAE v5)` = ae_term_display, Grade = ae_grade_label) %&gt;%
+  mutate(Grade = paste0(&quot;Grade &quot;, Grade)) %&gt;%
+  select(`Adverse event (CTCAE v5)`, Grade, `N (%)`) %&gt;%
+  kbl(caption = tbl_cap(paste0(
+    &quot;Treatment-related adverse events by CTCAE v5 preferred term and worst grade per patient (N = &quot;,
+    enrolled_n,
+    &quot;). Patients with any grade \u22653 event: &quot;,
+    round(grade3plus_rate, 0),
+    &quot;%.&quot;
+  ))) %&gt;%
+  ctr_table_style()
+
+# =============================================================================
+# R chunk: pd-summary  ()
+# =============================================================================
+pd_long &lt;- dat %&gt;%
+  filter(study_id %in% enrolled_ids) %&gt;%
+  select(study_id, redcap_event_name, crp_value, ferritin_value_num, esr_value_num) %&gt;%
+  pivot_longer(
+    cols = c(crp_value, ferritin_value_num, esr_value_num),
+    names_to = &quot;marker&quot;,
+    values_to = &quot;value&quot;
+  ) %&gt;%
+  filter(!is.na(value)) %&gt;%
+  mutate(
+    marker = recode(marker,
+      crp_value = &quot;CRP (mg/L)&quot;,
+      ferritin_value_num = &quot;Ferritin (µg/dL)&quot;,
+      esr_value_num = &quot;ESR (mm)&quot;
+    )
+  )
+
+pd_summary &lt;- pd_long %&gt;%
+  group_by(marker) %&gt;%
+  summarise(
+    N = n(),
+    Median = median(value),
+    IQR_low = quantile(value, 0.25),
+    IQR_high = quantile(value, 0.75),
+    .groups = &quot;drop&quot;
+  ) %&gt;%
+  mutate(
+    `Median (IQR)` = paste0(
+      fmt_num(Median), &quot; (&quot;, fmt_num(IQR_low), &quot;–&quot;, fmt_num(IQR_high), &quot;)&quot;
+    )
+  ) %&gt;%
+  select(Marker = marker, N, `Median (IQR)`)
+
+pd_summary %&gt;%
+  kbl(caption = tbl_cap(&quot;Pharmacodynamic laboratory values (all on-study assessments, enrolled patients).&quot;)) %&gt;%
+  ctr_table_style()
+
+# =============================================================================
+# R chunk: pd-change-summary  (, results=&#x27;asis&#x27;)
+# =============================================================================
+# PD change block: baseline (C1D1; screening fallback) to post-baseline C1 (C1D8/C1D15).
+pd_marker_cols &lt;- c(
+  crp_value = &quot;CRP (mg/L)&quot;,
+  ferritin_value_num = &quot;Ferritin (µg/dL)&quot;,
+  esr_value_num = &quot;ESR (mm)&quot;
+)
+
+pd_base &lt;- dat %&gt;%
+  filter(study_id %in% enrolled_ids, redcap_event_name %in% c(baseline_events, screening_events)) %&gt;%
+  select(study_id, redcap_event_name, all_of(names(pd_marker_cols))) %&gt;%
+  pivot_longer(
+    cols = all_of(names(pd_marker_cols)),
+    names_to = &quot;marker_key&quot;,
+    values_to = &quot;value&quot;
+  ) %&gt;%
+  filter(!is.na(value)) %&gt;%
+  mutate(
+    marker = recode(marker_key, !!!pd_marker_cols),
+    source_priority = if_else(redcap_event_name %in% baseline_events, 0L, 1L)
+  ) %&gt;%
+  arrange(study_id, marker, source_priority, redcap_event_name) %&gt;%
+  group_by(study_id, marker) %&gt;%
+  slice(1) %&gt;%
+  ungroup() %&gt;%
+  select(study_id, marker, baseline_value = value)
+
+pd_post &lt;- dat %&gt;%
+  filter(study_id %in% enrolled_ids, redcap_event_name %in% post_baseline_events) %&gt;%
+  select(study_id, redcap_event_name, all_of(names(pd_marker_cols))) %&gt;%
+  pivot_longer(
+    cols = all_of(names(pd_marker_cols)),
+    names_to = &quot;marker_key&quot;,
+    values_to = &quot;value&quot;
+  ) %&gt;%
+  filter(!is.na(value)) %&gt;%
+  mutate(marker = recode(marker_key, !!!pd_marker_cols)) %&gt;%
+  group_by(study_id, marker) %&gt;%
+  summarise(
+    post_min_value = min(value, na.rm = TRUE),
+    n_post_values = n(),
+    .groups = &quot;drop&quot;
+  )
+
+pd_change &lt;- pd_base %&gt;%
+  inner_join(pd_post, by = c(&quot;study_id&quot;, &quot;marker&quot;)) %&gt;%
+  filter(!is.na(baseline_value), baseline_value &gt; 0) %&gt;%
+  mutate(
+    pct_change = 100 * (post_min_value - baseline_value) / baseline_value,
+    pct_decline = pmax(-pct_change, 0)
+  )
+
+pd_change_summary &lt;- pd_change %&gt;%
+  group_by(marker) %&gt;%
+  summarise(
+    `N evaluable` = n_distinct(study_id),
+    `Baseline median` = fmt_num(median(baseline_value, na.rm = TRUE), 1),
+    `Post-baseline minimum median` = fmt_num(median(post_min_value, na.rm = TRUE), 1),
+    `Median % decline (IQR)` = paste0(
+      fmt_num(median(pct_decline, na.rm = TRUE), 1), &quot; (&quot;,
+      fmt_num(quantile(pct_decline, 0.25, na.rm = TRUE), 1), &quot;–&quot;,
+      fmt_num(quantile(pct_decline, 0.75, na.rm = TRUE), 1), &quot;)&quot;
+    ),
+    .groups = &quot;drop&quot;
+  ) %&gt;%
+  rename(Marker = marker)
+
+pd_change_summary %&gt;%
+  kbl(caption = tbl_cap(&quot;Pharmacodynamic decline from baseline to minimum post-baseline C1 value (C1D8/C1D15). Decline is bounded at 0% (no decline).&quot;)) %&gt;%
+  ctr_table_style()
+
+ferritin_c1_evaluable_n &lt;- pd_change %&gt;%
+  filter(marker == &quot;Ferritin (µg/dL)&quot;) %&gt;%
+  summarise(n = n_distinct(study_id)) %&gt;%
+  pull(n)
+
+ferritin_any_post_evaluable_n &lt;- {
+  pd_post_any &lt;- dat %&gt;%
+    filter(study_id %in% enrolled_ids) %&gt;%
+    filter(!redcap_event_name %in% c(screening_events, baseline_events)) %&gt;%
+    select(study_id, redcap_event_name, ferritin_value_num) %&gt;%
+    filter(!is.na(ferritin_value_num)) %&gt;%
+    distinct(study_id)
+
+  pd_base_ferritin &lt;- pd_base %&gt;%
+    filter(marker == &quot;Ferritin (µg/dL)&quot;) %&gt;%
+    distinct(study_id)
+
+  inner_join(pd_base_ferritin, pd_post_any, by = &quot;study_id&quot;) %&gt;%
+    summarise(n = n_distinct(study_id)) %&gt;%
+    pull(n)
+}
+
+cat(
+  &quot;\n\n**Ferritin evaluable count note:** baseline-to-post C1 (D8/D15) ferritin was available for &quot;,
+  ferritin_c1_evaluable_n,
+  &quot; patient(s); using any post-baseline visit (any cycle) would yield &quot;,
+  ferritin_any_post_evaluable_n,
+  &quot; patient(s).\n\n&quot;,
+  sep = &quot;&quot;
+)
+
+# =============================================================================
+# R chunk: pd-crp-responders  ()
+# =============================================================================
+crp_response &lt;- pd_change %&gt;%
+  filter(marker == &quot;CRP (mg/L)&quot;) %&gt;%
+  summarise(
+    `N evaluable` = n(),
+    `Decline ≥30%, n (%)` = paste0(sum(pct_decline &gt;= 30), &quot; (&quot;, sprintf(&quot;%.1f&quot;, 100 * mean(pct_decline &gt;= 30)), &quot;%)&quot;),
+    `Decline ≥50%, n (%)` = paste0(sum(pct_decline &gt;= 50), &quot; (&quot;, sprintf(&quot;%.1f&quot;, 100 * mean(pct_decline &gt;= 50)), &quot;%)&quot;),
+    `Median CRP % decline (IQR)` = paste0(
+      fmt_num(median(pct_decline, na.rm = TRUE), 1), &quot; (&quot;,
+      fmt_num(quantile(pct_decline, 0.25, na.rm = TRUE), 1), &quot;–&quot;,
+      fmt_num(quantile(pct_decline, 0.75, na.rm = TRUE), 1), &quot;)&quot;
+    )
+  )
+
+crp_response %&gt;%
+  kbl(caption = tbl_cap(&quot;CRP pharmacodynamic response summary among evaluable patients.&quot;)) %&gt;%
+  ctr_table_style()
+
+# =============================================================================
+# R chunk: bor-summary  ()
+# =============================================================================
+bor_tbl &lt;- surv_dat %&gt;%
+  transmute(`Best overall response (RECIST 1.1)` = coalesce(best_recist, &quot;Not assessed&quot;)) %&gt;%
+  count(`Best overall response (RECIST 1.1)`, name = &quot;N patients&quot;) %&gt;%
+  mutate(`N (%)` = paste0(`N patients`, &quot; (&quot;, sprintf(&quot;%.1f&quot;, 100 * `N patients` / enrolled_n), &quot;%)&quot;)) %&gt;%
+  arrange(desc(`N patients`), `Best overall response (RECIST 1.1)`)
+
+bor_tbl %&gt;%
+  kbl(caption = tbl_cap(&quot;Exploratory best overall response (RECIST 1.1) among enrolled patients.&quot;)) %&gt;%
+  ctr_table_style()
+
+# =============================================================================
+# R chunk: pfs-os-summary  ()
+# =============================================================================
+surv_summary &lt;- tibble(
+  Endpoint = c(&quot;Progression-free survival&quot;, &quot;Overall survival&quot;),
+  `N patients` = c(nrow(surv_pfs), nrow(surv_os)),
+  `N events` = c(sum(surv_pfs$pfs_event), sum(surv_os$os_event)),
+  `Median (months, 95% CI)` = c(
+    if (is.na(pfs_med$median)) {
+      &quot;Not reached / not estimable&quot;
+    } else {
+      paste0(
+        fmt_num(pfs_med$median, 1), &quot; (&quot;,
+        fmt_num(pfs_med$lcl, 1), &quot;–&quot;, fmt_num(pfs_med$ucl, 1), &quot;)&quot;
+      )
+    },
+    if (is.na(os_med$median)) {
+      &quot;Not reached / not estimable&quot;
+    } else {
+      paste0(
+        fmt_num(os_med$median, 1), &quot; (&quot;,
+        fmt_num(os_med$lcl, 1), &quot;–&quot;, fmt_num(os_med$ucl, 1), &quot;)&quot;
+      )
+    }
+  )
+)
+surv_summary %&gt;%
+  kbl(caption = tbl_cap(&quot;Exploratory progression-free survival and overall survival summary (Kaplan–Meier medians).&quot;)) %&gt;%
+  ctr_table_style()
+
+# =============================================================================
+# R chunk: pfs-os-by-patient  ()
+# =============================================================================
+pfs_os_tbl %&gt;%
+  kbl(
+    caption = tbl_cap(&quot;Patient-level progression-free survival and overall survival (derived from RECIST, discontinuation, and final status fields).&quot;)
+  ) %&gt;%
+  ctr_table_style()
+
+# =============================================================================
+# R chunk: km-pfs  (, fig.cap=fig_cap(&quot;Progression-free survival (Kaplan–Meier) from treatment start (exploratory; not powered). PFS events: RECIST PD or discontinuation for progression. Abbreviations: PFS, progression-free survival; PD, progressive disease; RECIST, Response Evaluation Criteria in Solid Tumors.&quot;), eval=!is.null(fit_pfs))
+# =============================================================================
+if (!is.null(fit_pfs)) {
+  ggsurvplot(
+    fit_pfs,
+    data = surv_pfs,
+    risk.table = TRUE,
+    conf.int = TRUE,
+    xlab = &quot;Months from treatment start&quot;,
+    ylab = &quot;Progression-free survival probability&quot;,
+    title = &quot;Exploratory progression-free survival&quot;,
+    legend = &quot;none&quot;,
+    risk.table.height = 0.25
+  )
+}
+
+# =============================================================================
+# R chunk: km-os  (, fig.cap=fig_cap(&quot;Overall survival (Kaplan–Meier) from treatment start (exploratory; not powered). Abbreviations: OS, overall survival.&quot;), eval=!is.null(fit_os))
+# =============================================================================
+if (!is.null(fit_os)) {
+  ggsurvplot(
+    fit_os,
+    data = surv_os,
+    risk.table = TRUE,
+    conf.int = TRUE,
+    xlab = &quot;Months from treatment start&quot;,
+    ylab = &quot;Overall survival probability&quot;,
+    title = &quot;Exploratory overall survival&quot;,
+    legend = &quot;none&quot;,
+    risk.table.height = 0.25
+  )
+}
+
+# =============================================================================
+# R chunk: appendix-included-subjects  ()
+# =============================================================================
+included_subject_ids &lt;- sort(unique(crp_endpoint$study_id))
+
+included_crp_visits &lt;- crp_long %&gt;%
+  filter(study_id %in% included_subject_ids) %&gt;%
+  mutate(
+    visit = case_when(
+      redcap_event_name %in% c(&quot;cycle_1_day_1__3_d_arm_1&quot;, &quot;cycle_1_day_1_arm_2&quot;, &quot;cycle_1_day_1_arm_3&quot;) ~ &quot;C1D1&quot;,
+      redcap_event_name %in% c(&quot;cycle_1_day_8_arm_2&quot;, &quot;cycle_1_day_8_arm_3&quot;) ~ &quot;C1D8&quot;,
+      redcap_event_name %in% c(&quot;cycle_1_day_15__3_arm_1&quot;, &quot;cycle_1_day_15_arm_2&quot;, &quot;cycle_1_day_15_arm_3&quot;) ~ &quot;C1D15&quot;,
+      TRUE ~ NA_character_
+    )
+  ) %&gt;%
+  filter(!is.na(visit)) %&gt;%
+  group_by(study_id, visit) %&gt;%
+  summarise(crp_mg_l = min(crp_value, na.rm = TRUE), .groups = &quot;drop&quot;) %&gt;%
+  pivot_wider(names_from = visit, values_from = crp_mg_l, names_prefix = &quot;CRP_&quot;)
+
+included_tbl &lt;- tibble(study_id = included_subject_ids) %&gt;%
+  left_join(
+    patient_master %&gt;%
+      select(
+        study_id,
+        primary_tumor_type,
+        age_years,
+        gender_label,
+        ecog_label
+      ),
+    by = &quot;study_id&quot;
+  ) %&gt;%
+  left_join(prior_systemic_lines, by = &quot;study_id&quot;) %&gt;%
+  left_join(
+    crp_endpoint %&gt;%
+      select(study_id, baseline_crp_mg_l, min_on_tx_crp_mg_l, max_pct_decline, n_crp_on_tx),
+    by = &quot;study_id&quot;
+  ) %&gt;%
+  left_join(included_crp_visits, by = &quot;study_id&quot;) %&gt;%
+  left_join(
+    surv_dat %&gt;%
+      select(study_id, pfs_event, pfs_months, os_event, os_months),
+    by = &quot;study_id&quot;
+  ) %&gt;%
+  mutate(
+    `Study ID` = study_id,
+    `Primary cancer type` = primary_tumor_type,
+    `Age (years)` = round(age_years, 0),
+    Sex = gender_label,
+    ECOG = ecog_label,
+    `Prior systemic lines` = n_systemic_lines,
+    `CRP baseline C1D1 (mg/L)` = round(baseline_crp_mg_l, 1),
+    `CRP C1D8 (mg/L)` = round(CRP_C1D8, 1),
+    `CRP C1D15 (mg/L)` = round(CRP_C1D15, 1),
+    `Lowest post-baseline CRP (mg/L)` = round(min_on_tx_crp_mg_l, 1),
+    `Max CRP decline (%)` = round(max_pct_decline, 1),
+    `N post-baseline CRP values` = n_crp_on_tx,
+    `PFS event` = if_else(pfs_event, &quot;Yes&quot;, &quot;No&quot;),
+    `PFS (months)` = round(pfs_months, 1),
+    `OS event (death)` = if_else(os_event, &quot;Yes&quot;, &quot;No&quot;),
+    `OS (months)` = round(os_months, 1)
+  ) %&gt;%
+  select(
+    `Study ID`,
+    `Primary cancer type`,
+    `Age (years)`,
+    Sex,
+    ECOG,
+    `Prior systemic lines`,
+    `CRP baseline C1D1 (mg/L)`,
+    `CRP C1D8 (mg/L)`,
+    `CRP C1D15 (mg/L)`,
+    `Lowest post-baseline CRP (mg/L)`,
+    `Max CRP decline (%)`,
+    `N post-baseline CRP values`,
+    `PFS event`,
+    `PFS (months)`,
+    `OS event (death)`,
+    `OS (months)`
+  ) %&gt;%
+  arrange(`Study ID`)
+
+included_tbl %&gt;%
+  kbl(
+    caption = tbl_cap(paste0(
+      &quot;Subject-level dataset for patients included in primary endpoint analysis (N = &quot;,
+      nrow(included_tbl),
+      &quot;).&quot;
+    ))
+  ) %&gt;%
+  ctr_table_style()
 </code></pre>
 </body>
 </html>
