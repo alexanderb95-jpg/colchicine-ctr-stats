@@ -1002,9 +1002,61 @@ if (nrow(crp_endpoint) > 0) {
 }
 ```
 
-```{r tumor-waterfall-plot, fig.cap=fig_cap("Best percent change in target-lesion sum of diameters (SOD) from baseline among all enrolled patients (N = 11). Bars are shown for patients with ≥2 on-study scan sets (n = 5); patients without paired post-baseline target-lesion measurements are labeled NE (not evaluable for % change). Negative values indicate tumor shrinkage. Abbreviations: SOD, sum of diameters; NE, not evaluable.")}
+```{r tumor-waterfall-plot, fig.width = 11, fig.height = 6.8, fig.cap=fig_cap("Best percent change in target-lesion sum of diameters (SOD) from baseline among all enrolled patients (N = 11). Bars are shown for patients with ≥2 on-study scan sets (n = 5); patients without paired post-baseline target-lesion measurements are labeled NE (not evaluable for % change). Axis labels under each Study ID show maximum on-treatment CRP decline (primary endpoint definition; CRP NE if no cycle 1 post-baseline CRP) and the most recent prior systemic regimen (last line). Negative SOD values indicate tumor shrinkage. Abbreviations: SOD, sum of diameters; NE, not evaluable; PLD, pegylated liposomal doxorubicin.")}
+# Last-line prior systemic regimen (most recent end date among coded systemic agents)
+systemic_rx_pat <- paste0(
+  "(carboplatin|cisplatin|oxaliplatin|taxol|paclitaxel|docetaxel|gemcitabine|",
+  "topotecan|doxil|doxorubicin|etoposide|bevacizumab|pembrolizumab|nivolumab|",
+  "ipilimumab|atezolizumab|enfortumab|olaparib|rucaparib|niraparib|xeloda|",
+  "capecitabine|irinotecan|panitumumab|fluorouracil|5-fu)"
+)
+normalize_drug <- function(x) {
+  dplyr::recode(
+    tolower(x),
+    taxol = "paclitaxel",
+    doxil = "PLD",
+    xeloda = "cape",
+    capecitabine = "cape",
+    fluorouracil = "5-FU",
+    "5-fu" = "5-FU",
+    pembrolizumab = "pembro",
+    nivolumab = "nivo",
+    ipilimumab = "ipi",
+    atezolizumab = "atezo",
+    bevacizumab = "bev",
+    carboplatin = "carbo",
+    gemcitabine = "gem",
+    .default = tolower(x)
+  )
+}
+prior_last_line <- dat %>%
+  filter(
+    study_id %in% enrolled_ids,
+    redcap_repeat_instrument == "prior_treatment_therapy",
+    !is.na(prior_treatment_therapies),
+    prior_treatment_therapies != ""
+  ) %>%
+  mutate(
+    study_id = as.character(study_id),
+    therapy_l = tolower(coalesce(prior_treatment_therapies, "")),
+    drug = stringr::str_extract(.data$therapy_l, systemic_rx_pat),
+    end_dt = dplyr::coalesce(.data$therapy_end_date, .data$therapy_start_date)
+  ) %>%
+  filter(!is.na(.data$drug), !is.na(.data$end_dt)) %>%
+  group_by(study_id) %>%
+  filter(.data$end_dt == max(.data$end_dt, na.rm = TRUE)) %>%
+  summarise(
+    last_line = paste(unique(normalize_drug(.data$drug)), collapse = "/"),
+    .groups = "drop"
+  )
+
 tumor_waterfall_dat <- tibble(study_id = as.character(enrolled_ids)) %>%
   left_join(tumor_change, by = "study_id") %>%
+  left_join(
+    crp_endpoint %>% transmute(study_id = as.character(study_id), max_pct_decline),
+    by = "study_id"
+  ) %>%
+  left_join(prior_last_line, by = "study_id") %>%
   mutate(
     evaluable = !is.na(best_pct_change),
     plot_y = if_else(evaluable, best_pct_change, NA_real_),
@@ -1013,9 +1065,22 @@ tumor_waterfall_dat <- tibble(study_id = as.character(enrolled_ids)) %>%
       best_pct_change < 0 ~ "Shrinkage",
       TRUE ~ "Growth"
     ),
-    order_val = if_else(evaluable, best_pct_change, Inf)
+    order_val = if_else(evaluable, best_pct_change, Inf),
+    crp_lab = if_else(
+      is.na(max_pct_decline),
+      "CRP NE",
+      paste0("CRP ↓", sprintf("%.0f", max_pct_decline), "%")
+    ),
+    prior_lab = if_else(
+      is.na(last_line) | last_line == "",
+      "prior: RT/surg only",
+      paste0("prior: ", stringr::str_wrap(last_line, width = 16))
+    ),
+    axis_lab = paste0("ID ", study_id, "\n", crp_lab, "\n", prior_lab)
   ) %>%
   mutate(study_id = reorder(factor(study_id), order_val))
+
+axis_lab_map <- setNames(tumor_waterfall_dat$axis_lab, as.character(tumor_waterfall_dat$study_id))
 
 if (nrow(tumor_waterfall_dat) > 0) {
   ggplot(tumor_waterfall_dat, aes(x = study_id, y = plot_y, fill = direction)) +
@@ -1029,16 +1094,21 @@ if (nrow(tumor_waterfall_dat) > 0) {
       color = "gray40",
       inherit.aes = FALSE
     ) +
+    scale_x_discrete(labels = axis_lab_map) +
     scale_fill_manual(
       values = c("Shrinkage" = "#2C6FAC", "Growth" = "#C75B39", "NE" = "gray70"),
       guide = "none"
     ) +
     labs(
-      x = "Study ID",
+      x = NULL,
       y = "Best % change in target-lesion SOD"
     ) +
     theme_minimal(base_size = 12) +
-    theme(panel.grid.major.x = element_blank())
+    theme(
+      panel.grid.major.x = element_blank(),
+      axis.text.x = element_text(size = 7.5, lineheight = 0.95, vjust = 1),
+      plot.margin = margin(5.5, 5.5, 5.5, 5.5)
+    )
 } else {
   plot.new()
   text(0.5, 0.5, "No evaluable tumor-change data")
