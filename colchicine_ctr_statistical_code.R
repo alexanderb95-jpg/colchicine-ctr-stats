@@ -236,6 +236,34 @@ protocol2101175_screen_fail_labels <- function(row, labs = NULL) {
   )
 }
 
+#' Map REDCap screening visit to protocol enrollment era.
+protocol2101175_protocol_era <- function(screening_event) {
+  dplyr::case_when(
+    screening_event == "screening_28_days_arm_1" ~ "original",
+    screening_event == "screening_arm_2" ~ "amended",
+    screening_event == "screening_arm_3" ~ "cohort2",
+    TRUE ~ NA_character_
+  )
+}
+
+#' Human-readable label for protocol enrollment era.
+protocol2101175_protocol_era_label <- function(era) {
+  dplyr::case_when(
+    era == "original" ~ "Original schedule (indefinite colchicine + surveillance imaging)",
+    era == "amended" ~ "Amended schedule (fixed 2-week phase 0 intervention)",
+    era == "cohort2" ~ "Cohort 2 (closed; not enrolled)",
+    TRUE ~ NA_character_
+  )
+}
+
+#' Enrolled patients under the original schedule (Kaplan–Meier–evaluable).
+protocol2101175_km_eligible_ids <- function(disposition) {
+  disposition %>%
+    dplyr::filter(.data$enrolled, .data$protocol_era == "original") %>%
+    dplyr::pull(.data$study_id) %>%
+    sort()
+}
+
 #' Build accrual disposition (consent, enrollment, screen-fail) from screening visits.
 build_protocol2101175_screen_disposition <- function(dat) {
   screening_events <- c("screening_28_days_arm_1", "screening_arm_2", "screening_arm_3")
@@ -273,17 +301,21 @@ build_protocol2101175_screen_disposition <- function(dat) {
       disp_rows %>%
         dplyr::transmute(
           study_id = .data$study_id,
+          screening_redcap_event = .data$redcap_event_name,
           enrolled_flag = .data$was_the_subject_enrolled,
           enroll_date = .data$date_of_enrollment
         ),
       by = "study_id"
     ) %>%
     dplyr::mutate(
+      protocol_era = protocol2101175_protocol_era(.data$screening_redcap_event),
+      protocol_era_label = protocol2101175_protocol_era_label(.data$protocol_era),
       screen_fail_reason_redcap = vapply(label_mat, `[[`, character(1), "screen_fail_reason_redcap"),
       screen_fail_reason = vapply(label_mat, `[[`, character(1), "screen_fail_reason"),
       screen_fail_detail = vapply(label_mat, `[[`, character(1), "screen_fail_detail"),
       enrolled = .data$enrolled_flag == 1,
       screen_fail = .data$enrolled_flag == 0,
+      km_evaluable = .data$enrolled_flag == 1 & .data$protocol_era == "original",
       disposition = dplyr::case_when(
         .data$enrolled ~ "Enrolled",
         .data$screen_fail ~ "Screen failure",
@@ -481,6 +513,83 @@ build_protocol2101175_survival <- function(dat, enrolled_ids) {
     dplyr::arrange(.data$study_id)
 }
 
+#' Best % change in target-lesion sum of diameters (SOD) for enrolled patients.
+#'
+#' Scan sets are inferred within target_tumor_lesion_details by resets of lesion_number_t
+#' to 1. First set = baseline; subsequent sets = post-baseline. Best % change is the
+#' minimum post-baseline change (most negative = maximum shrinkage). Patients with
+#' fewer than 2 scan sets are excluded.
+build_protocol2101175_tumor_change <- function(dat, enrolled_ids) {
+  les <- dat %>%
+    dplyr::filter(
+      .data$study_id %in% enrolled_ids,
+      .data$redcap_repeat_instrument == "target_tumor_lesion_details"
+    ) %>%
+    dplyr::mutate(
+      lesion_number_t = suppressWarnings(as.numeric(.data$lesion_number_t)),
+      ld = suppressWarnings(as.numeric(.data$longest_diameter_t))
+    ) %>%
+    dplyr::filter(!is.na(.data$ld), !is.na(.data$lesion_number_t)) %>%
+    dplyr::arrange(.data$study_id, .data$redcap_repeat_instance)
+
+  if (nrow(les) == 0) {
+    return(tibble::tibble(
+      study_id = character(),
+      baseline_sod = numeric(),
+      best_pct_change = numeric(),
+      max_shrinkage_pct = numeric(),
+      n_post_scans = integer()
+    ))
+  }
+
+  assign_scan_sets <- function(df) {
+    ln <- df$lesion_number_t
+    set_id <- integer(nrow(df))
+    cur <- 0L
+    prev <- NA_real_
+    for (i in seq_len(nrow(df))) {
+      if (is.na(prev)) {
+        cur <- 1L
+      } else if (ln[[i]] == 1 && prev != 1) {
+        cur <- cur + 1L
+      }
+      set_id[[i]] <- cur
+      prev <- ln[[i]]
+    }
+    df$scan_set <- set_id
+    df
+  }
+
+  les %>%
+    split(.$study_id) %>%
+    lapply(assign_scan_sets) %>%
+    dplyr::bind_rows() %>%
+    dplyr::mutate(study_id = as.character(.data$study_id)) %>%
+    dplyr::group_by(.data$study_id, .data$scan_set) %>%
+    dplyr::summarise(sod = sum(.data$ld), .groups = "drop") %>%
+    dplyr::group_by(.data$study_id) %>%
+    dplyr::filter(dplyr::n_distinct(.data$scan_set) >= 2) %>%
+    dplyr::arrange(.data$scan_set, .by_group = TRUE) %>%
+    dplyr::mutate(
+      baseline_sod = .data$sod[.data$scan_set == min(.data$scan_set)][[1]],
+      pct_change = dplyr::if_else(
+        .data$scan_set == min(.data$scan_set),
+        NA_real_,
+        100 * (.data$sod - .data$baseline_sod) / .data$baseline_sod
+      )
+    ) %>%
+    dplyr::filter(!is.na(.data$pct_change)) %>%
+    dplyr::summarise(
+      baseline_sod = dplyr::first(.data$baseline_sod),
+      best_pct_change = min(.data$pct_change, na.rm = TRUE),
+      max_shrinkage_pct = pmax(-min(.data$pct_change, na.rm = TRUE), 0),
+      n_post_scans = dplyr::n(),
+      .groups = "drop"
+    ) %>%
+    dplyr::mutate(study_id = as.character(.data$study_id)) %>%
+    dplyr::arrange(.data$study_id)
+}
+
 #' Infer primary tumor type from prior therapy / surgery text (no dedicated REDCap diagnosis field)
 infer_primary_tumor_type <- function(study_id, therapy_names) {
   t <- tolower(paste(unique(therapy_names[!is.na(therapy_names) & therapy_names != ""]), collapse = " | "))
@@ -646,15 +755,44 @@ screen_fail_ids <- screen_disposition %>%
   pull(study_id) %>%
   sort()
 
+enrolled_original_ids <- screen_disposition %>%
+  filter(enrolled, protocol_era == "original") %>%
+  pull(study_id) %>%
+  sort()
+enrolled_amended_ids <- screen_disposition %>%
+  filter(enrolled, protocol_era == "amended") %>%
+  pull(study_id) %>%
+  sort()
+km_eligible_ids <- protocol2101175_km_eligible_ids(screen_disposition)
+
 consented_n <- length(consented_ids)
 enrolled_n <- length(enrolled_ids)
+enrolled_original_n <- length(enrolled_original_ids)
+enrolled_amended_n <- length(enrolled_amended_ids)
+km_eligible_n <- length(km_eligible_ids)
 screen_fail_n <- length(screen_fail_ids)
+screen_fail_original_n <- screen_disposition %>%
+  filter(screen_fail, protocol_era == "original") %>%
+  nrow()
+screen_fail_amended_n <- screen_disposition %>%
+  filter(screen_fail, protocol_era == "amended") %>%
+  nrow()
 screened_n <- consented_n
 
 assert_partition_sums(
   "Accrual disposition (consented vs enrolled + screen-fail)",
   c(enrolled_n, screen_fail_n),
   consented_n
+)
+assert_partition_sums(
+  "Enrolled patients by protocol schedule",
+  c(enrolled_original_n, enrolled_amended_n),
+  enrolled_n
+)
+assert_partition_sums(
+  "Screen failures by protocol schedule",
+  c(screen_fail_original_n, screen_fail_amended_n),
+  screen_fail_n
 )
 
 screen_fail_summary <- summarise_screen_fail_reasons(screen_disposition)
@@ -711,6 +849,21 @@ primary_sd <- sd(crp_endpoint$max_pct_decline, na.rm = TRUE)
 primary_p <- if (!is.null(primary_test)) primary_test$p.value else NA_real_
 primary_t <- if (!is.null(primary_test)) primary_test$statistic else NA_real_
 primary_ci_low <- if (!is.null(primary_test)) primary_test$conf.int[1] else NA_real_
+
+cohens_d_primary <- if (evaluable_efficacy_n >= 2 && !is.na(primary_sd) && primary_sd > 0) {
+  primary_mean / primary_sd
+} else {
+  NA_real_
+}
+
+posthoc_power_pct <- if (evaluable_efficacy_n >= 2 && !is.na(cohens_d_primary)) {
+  n <- evaluable_efficacy_n
+  ncp <- cohens_d_primary * sqrt(n)
+  t_crit <- qt(1 - 0.025, df = n - 1)
+  (1 - pt(t_crit, df = n - 1, ncp = ncp)) * 100
+} else {
+  NA_real_
+}
 
 # ---- Patient-level master (one row per enrolled subject) ----
 # Demographics from screening visit; first non-missing value per field (not first table row).
@@ -899,6 +1052,17 @@ grade3plus_rate <- ae_worst_per_patient %>%
   distinct(study_id) %>%
   nrow() / enrolled_n * 100
 
+trae_patient_n <- ae_all %>%
+  distinct(study_id) %>%
+  nrow()
+trae_patient_pct <- 100 * trae_patient_n / enrolled_n
+
+trae_diarrhea_n <- ae_worst_per_patient %>%
+  filter(tolower(ae_term_display) == "diarrhea") %>%
+  distinct(study_id) %>%
+  nrow()
+trae_diarrhea_pct <- 100 * trae_diarrhea_n / enrolled_n
+
 # Helpers for inline text (also used in survival tables)
 fmt_p <- function(p) {
   if (is.na(p)) return("NA")
@@ -919,7 +1083,11 @@ fig_cap <- function(title) {
 }
 
 # ---- Survival / status (PFS/OS derived from RECIST, discontinuation, final status) ----
-surv_dat <- build_protocol2101175_survival(dat, enrolled_ids)
+# Restrict to original-schedule enrollments with serial imaging surveillance (Arm 1).
+surv_dat <- build_protocol2101175_survival(dat, km_eligible_ids)
+
+# Best % change in target-lesion SOD (exploratory; patients with ≥2 scan sets)
+tumor_change <- build_protocol2101175_tumor_change(dat, enrolled_ids)
 
 status_tbl <- surv_dat %>%
   transmute(
@@ -1006,7 +1174,15 @@ trial_info <- tibble(
     "Single-center, open-label, non-randomized pilot",
     "Maximum percentage decline in peripheral blood CRP from cycle 1 day 1 during on-study colchicine",
     "CTCAE v5.0 safety; PFS (Cohort 1); DFS/OS (Cohort 2); exploratory cytokines, ctDNA, tissue correlatives",
-    "Cohort 1 low-dose (BID) and high-dose (TID) were sequential; only low-dose enrolled. Cohort 2 closed for poor accrual before enrollment."
+    paste0(
+      "Cohort 1 low-dose (BID) and high-dose (TID) were sequential; only low-dose enrolled. ",
+      "Cohort 2 closed for poor accrual before enrollment. During conduct, the protocol was amended: ",
+      "the first ", enrolled_original_n, " enrolled patients received indefinite on-study colchicine ",
+      "with serial imaging surveillance; the subsequent ", enrolled_amended_n,
+      " enrolled patients received a fixed 2-week colchicine course (phase 0 pharmacodynamic design). ",
+      "Exploratory Kaplan–Meier PFS/OS analyses were restricted to the original-schedule cohort (n = ",
+      km_eligible_n, ")."
+    )
   )
 )
 trial_info %>%
@@ -1084,14 +1260,29 @@ accrual_overview <- tibble(
   Disposition = c(
     "Signed informed consent",
     "Enrolled on study",
-    "Screen failure before enrollment"
+    "  Original schedule (indefinite colchicine + surveillance imaging)",
+    "  Amended schedule (fixed 2-week phase 0 intervention)",
+    "Screen failure before enrollment",
+    "  Before original schedule",
+    "  After protocol amendment"
   ),
-  N = c(consented_n, enrolled_n, screen_fail_n)
+  N = c(
+    consented_n,
+    enrolled_n,
+    enrolled_original_n,
+    enrolled_amended_n,
+    screen_fail_n,
+    screen_fail_original_n,
+    screen_fail_amended_n
+  )
 ) %>%
-  mutate(`N (%)` = if_else(
-    Disposition == "Signed informed consent",
-    as.character(N),
-    paste0(N, " (", trimws(fmt_num(100 * N / consented_n, 1)), "% of consented)")
+  mutate(`N (%)` = case_when(
+    Disposition == "Signed informed consent" ~ as.character(N),
+    Disposition == "Enrolled on study" ~ paste0(N, " (", trimws(fmt_num(100 * N / consented_n, 1)), "% of consented)"),
+    Disposition == "Screen failure before enrollment" ~ paste0(N, " (", trimws(fmt_num(100 * N / consented_n, 1)), "% of consented)"),
+    grepl("^  Original schedule", Disposition) ~ paste0(N, " (Kaplan–Meier–evaluable)"),
+    grepl("^  Amended schedule", Disposition) ~ paste0(N, " (primary CRP / toxicity only)"),
+    TRUE ~ paste0(N, " (", trimws(fmt_num(100 * N / consented_n, 1)), "% of consented)")
   ))
 
 accrual_overview %>%
@@ -1255,19 +1446,64 @@ crp_endpoint %>%
 # =============================================================================
 if (nrow(crp_endpoint) > 0) {
   crp_endpoint %>%
-    mutate(study_id = factor(study_id)) %>%
-    ggplot(aes(x = reorder(study_id, max_pct_decline), y = max_pct_decline)) +
-    geom_col(fill = "#2C6FAC") +
-    geom_hline(yintercept = 0, linewidth = 0.3) +
-    coord_flip() +
+    mutate(study_id = reorder(factor(as.character(study_id)), -max_pct_decline)) %>%
+    ggplot(aes(x = study_id, y = max_pct_decline)) +
+    geom_col(width = 0.75, fill = "#2C6FAC") +
+    geom_hline(yintercept = 0, linewidth = 0.4) +
+    scale_y_continuous(expand = expansion(mult = c(0, 0.08))) +
     labs(
       x = "Study ID",
       y = "Maximum CRP decline (%)"
     ) +
-    theme_minimal(base_size = 12)
+    theme_minimal(base_size = 12) +
+    theme(panel.grid.major.x = element_blank())
 } else {
   plot.new()
   text(0.5, 0.5, "No evaluable CRP endpoint data")
+}
+
+# =============================================================================
+# R chunk: tumor-waterfall-plot  (, fig.cap=fig_cap("Best percent change in target-lesion sum of diameters (SOD) from baseline among all enrolled patients (N = 11). Bars are shown for patients with ≥2 on-study scan sets (n = 5); patients without paired post-baseline target-lesion measurements are labeled NE (not evaluable for % change). Negative values indicate tumor shrinkage. Abbreviations: SOD, sum of diameters; NE, not evaluable."))
+# =============================================================================
+tumor_waterfall_dat <- tibble(study_id = as.character(enrolled_ids)) %>%
+  left_join(tumor_change, by = "study_id") %>%
+  mutate(
+    evaluable = !is.na(best_pct_change),
+    plot_y = if_else(evaluable, best_pct_change, NA_real_),
+    direction = case_when(
+      !evaluable ~ "NE",
+      best_pct_change < 0 ~ "Shrinkage",
+      TRUE ~ "Growth"
+    ),
+    order_val = if_else(evaluable, best_pct_change, Inf)
+  ) %>%
+  mutate(study_id = reorder(factor(study_id), order_val))
+
+if (nrow(tumor_waterfall_dat) > 0) {
+  ggplot(tumor_waterfall_dat, aes(x = study_id, y = plot_y, fill = direction)) +
+    geom_col(data = ~ filter(.x, evaluable), width = 0.75, na.rm = TRUE) +
+    geom_hline(yintercept = 0, linewidth = 0.4) +
+    geom_text(
+      data = ~ filter(.x, !evaluable),
+      aes(x = study_id, y = 0, label = "NE"),
+      vjust = -0.4,
+      size = 3.2,
+      color = "gray40",
+      inherit.aes = FALSE
+    ) +
+    scale_fill_manual(
+      values = c("Shrinkage" = "#2C6FAC", "Growth" = "#C75B39", "NE" = "gray70"),
+      guide = "none"
+    ) +
+    labs(
+      x = "Study ID",
+      y = "Best % change in target-lesion SOD"
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(panel.grid.major.x = element_blank())
+} else {
+  plot.new()
+  text(0.5, 0.5, "No evaluable tumor-change data")
 }
 
 # =============================================================================
@@ -1490,11 +1726,11 @@ crp_response %>%
 bor_tbl <- surv_dat %>%
   transmute(`Best overall response (RECIST 1.1)` = coalesce(best_recist, "Not assessed")) %>%
   count(`Best overall response (RECIST 1.1)`, name = "N patients") %>%
-  mutate(`N (%)` = paste0(`N patients`, " (", sprintf("%.1f", 100 * `N patients` / enrolled_n), "%)")) %>%
+  mutate(`N (%)` = paste0(`N patients`, " (", sprintf("%.1f", 100 * `N patients` / km_eligible_n), "%)")) %>%
   arrange(desc(`N patients`), `Best overall response (RECIST 1.1)`)
 
 bor_tbl %>%
-  kbl(caption = tbl_cap("Exploratory best overall response (RECIST 1.1) among enrolled patients.")) %>%
+  kbl(caption = tbl_cap("Exploratory best overall response (RECIST 1.1) among original-schedule enrolled patients (Kaplan–Meier cohort).")) %>%
   ctr_table_style()
 
 # =============================================================================
@@ -1524,7 +1760,10 @@ surv_summary <- tibble(
   )
 )
 surv_summary %>%
-  kbl(caption = tbl_cap("Exploratory progression-free survival and overall survival summary (Kaplan–Meier medians).")) %>%
+  kbl(caption = tbl_cap(paste0(
+    "Exploratory progression-free survival and overall survival summary (Kaplan–Meier medians; original-schedule cohort, n = ",
+    km_eligible_n, ")."
+  ))) %>%
   ctr_table_style()
 
 # =============================================================================
@@ -1532,12 +1771,12 @@ surv_summary %>%
 # =============================================================================
 pfs_os_tbl %>%
   kbl(
-    caption = tbl_cap("Patient-level progression-free survival and overall survival (derived from RECIST, discontinuation, and final status fields).")
+    caption = tbl_cap("Patient-level progression-free survival and overall survival among original-schedule enrolled patients (derived from RECIST, discontinuation, and final status fields).")
   ) %>%
   ctr_table_style()
 
 # =============================================================================
-# R chunk: km-pfs  (, fig.cap=fig_cap("Progression-free survival (Kaplan–Meier) from treatment start (exploratory; not powered). PFS events: RECIST PD or discontinuation for progression. Abbreviations: PFS, progression-free survival; PD, progressive disease; RECIST, Response Evaluation Criteria in Solid Tumors."), eval=!is.null(fit_pfs))
+# R chunk: km-pfs  (, fig.cap=fig_cap(paste0("Progression-free survival (Kaplan–Meier) from treatment start among patients enrolled under the original indefinite colchicine schedule with surveillance imaging (n = ", km_eligible_n, "; exploratory; not powered). PFS events: RECIST PD or discontinuation for progression. Abbreviations: PFS, progression-free survival; PD, progressive disease; RECIST, Response Evaluation Criteria in Solid Tumors.")), eval=!is.null(fit_pfs))
 # =============================================================================
 if (!is.null(fit_pfs)) {
   ggsurvplot(
@@ -1554,7 +1793,7 @@ if (!is.null(fit_pfs)) {
 }
 
 # =============================================================================
-# R chunk: km-os  (, fig.cap=fig_cap("Overall survival (Kaplan–Meier) from treatment start (exploratory; not powered). Abbreviations: OS, overall survival."), eval=!is.null(fit_os))
+# R chunk: km-os  (, fig.cap=fig_cap(paste0("Overall survival (Kaplan–Meier) from treatment start among patients enrolled under the original indefinite colchicine schedule with surveillance imaging (n = ", km_eligible_n, "; exploratory; not powered). Abbreviations: OS, overall survival.")), eval=!is.null(fit_os))
 # =============================================================================
 if (!is.null(fit_os)) {
   ggsurvplot(

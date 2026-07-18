@@ -148,15 +148,44 @@ screen_fail_ids <- screen_disposition %>%
   pull(study_id) %>%
   sort()
 
+enrolled_original_ids <- screen_disposition %>%
+  filter(enrolled, protocol_era == "original") %>%
+  pull(study_id) %>%
+  sort()
+enrolled_amended_ids <- screen_disposition %>%
+  filter(enrolled, protocol_era == "amended") %>%
+  pull(study_id) %>%
+  sort()
+km_eligible_ids <- protocol2101175_km_eligible_ids(screen_disposition)
+
 consented_n <- length(consented_ids)
 enrolled_n <- length(enrolled_ids)
+enrolled_original_n <- length(enrolled_original_ids)
+enrolled_amended_n <- length(enrolled_amended_ids)
+km_eligible_n <- length(km_eligible_ids)
 screen_fail_n <- length(screen_fail_ids)
+screen_fail_original_n <- screen_disposition %>%
+  filter(screen_fail, protocol_era == "original") %>%
+  nrow()
+screen_fail_amended_n <- screen_disposition %>%
+  filter(screen_fail, protocol_era == "amended") %>%
+  nrow()
 screened_n <- consented_n
 
 assert_partition_sums(
   "Accrual disposition (consented vs enrolled + screen-fail)",
   c(enrolled_n, screen_fail_n),
   consented_n
+)
+assert_partition_sums(
+  "Enrolled patients by protocol schedule",
+  c(enrolled_original_n, enrolled_amended_n),
+  enrolled_n
+)
+assert_partition_sums(
+  "Screen failures by protocol schedule",
+  c(screen_fail_original_n, screen_fail_amended_n),
+  screen_fail_n
 )
 
 screen_fail_summary <- summarise_screen_fail_reasons(screen_disposition)
@@ -213,6 +242,21 @@ primary_sd <- sd(crp_endpoint$max_pct_decline, na.rm = TRUE)
 primary_p <- if (!is.null(primary_test)) primary_test$p.value else NA_real_
 primary_t <- if (!is.null(primary_test)) primary_test$statistic else NA_real_
 primary_ci_low <- if (!is.null(primary_test)) primary_test$conf.int[1] else NA_real_
+
+cohens_d_primary <- if (evaluable_efficacy_n >= 2 && !is.na(primary_sd) && primary_sd > 0) {
+  primary_mean / primary_sd
+} else {
+  NA_real_
+}
+
+posthoc_power_pct <- if (evaluable_efficacy_n >= 2 && !is.na(cohens_d_primary)) {
+  n <- evaluable_efficacy_n
+  ncp <- cohens_d_primary * sqrt(n)
+  t_crit <- qt(1 - 0.025, df = n - 1)
+  (1 - pt(t_crit, df = n - 1, ncp = ncp)) * 100
+} else {
+  NA_real_
+}
 
 # ---- Patient-level master (one row per enrolled subject) ----
 # Demographics from screening visit; first non-missing value per field (not first table row).
@@ -401,6 +445,17 @@ grade3plus_rate <- ae_worst_per_patient %>%
   distinct(study_id) %>%
   nrow() / enrolled_n * 100
 
+trae_patient_n <- ae_all %>%
+  distinct(study_id) %>%
+  nrow()
+trae_patient_pct <- 100 * trae_patient_n / enrolled_n
+
+trae_diarrhea_n <- ae_worst_per_patient %>%
+  filter(tolower(ae_term_display) == "diarrhea") %>%
+  distinct(study_id) %>%
+  nrow()
+trae_diarrhea_pct <- 100 * trae_diarrhea_n / enrolled_n
+
 # Helpers for inline text (also used in survival tables)
 fmt_p <- function(p) {
   if (is.na(p)) return("NA")
@@ -421,7 +476,11 @@ fig_cap <- function(title) {
 }
 
 # ---- Survival / status (PFS/OS derived from RECIST, discontinuation, final status) ----
-surv_dat <- build_protocol2101175_survival(dat, enrolled_ids)
+# Restrict to original-schedule enrollments with serial imaging surveillance (Arm 1).
+surv_dat <- build_protocol2101175_survival(dat, km_eligible_ids)
+
+# Best % change in target-lesion SOD (exploratory; patients with ≥2 scan sets)
+tumor_change <- build_protocol2101175_tumor_change(dat, enrolled_ids)
 
 status_tbl <- surv_dat %>%
   transmute(
@@ -596,23 +655,23 @@ ctr_table_style <- function(kbl) {
 
 ## Abstract
 
-**Background:** Pro-tumorigenic inflammation in solid tumors is linked to IL-1β–NLRP3 signaling and elevated C-reactive protein (CRP). Preclinical and translational work, including studies of myeloid inflammation signatures in urothelial carcinoma (e.g., Tran et al., [PMC13069984](https://pmc.ncbi.nlm.nih.gov/articles/PMC13069984/)), supported targeting this axis with colchicine. We conducted a single-center pilot trial to estimate the pharmacodynamic effect of colchicine on CRP in advanced solid tumors and high-risk urothelial carcinoma.
+**Background:** Pro-tumorigenic inflammation in advanced solid tumors is linked to IL-1β–NLRP3 signaling and elevated C-reactive protein (CRP). We conducted a single-center open-label pilot trial to evaluate colchicine effects on peripheral blood CRP in patients with advanced or recurrent solid tumors.
 
-**Methods:** Open-label, non-randomized pilot (planned N = 45). Cohort 1: metastatic/recurrent solid tumors with CRP > 5 mg/L — colchicine 0.6 mg twice daily (BID) or three times daily (TID) for 14 days. Cohort 2: resected high-risk urothelial carcinoma — colchicine 0.6 mg BID for 28 days with adjuvant nivolumab. Primary endpoint: maximum percent decline in CRP from cycle 1 day 1 during on-treatment assessment. Safety per CTCAE v5.0.
+**Methods:** Eligible patients had metastatic or recurrent solid tumors with CRP greater than 5 mg/L and received colchicine 0.6 mg orally twice daily (Cohort 1 low dose). A protocol amendment limited later enrollments to a fixed 2-week course; earlier enrollments received indefinite colchicine with serial imaging. The primary endpoint was maximum percent CRP decline from cycle 1 day 1 to the lowest on-treatment value. Planned high-dose and adjuvant cohorts did not accrue.
 
-**Results:** `r consented_n` patients signed informed consent; `r enrolled_n` enrolled on study and `r screen_fail_n` failed screening before enrollment (Accrual Disposition). All enrolled patients were Cohort 1 low-dose BID. Cohort 1 high-dose and Cohort 2 did not accrue (Cohort 2 closed for poor accrual). `r evaluable_efficacy_n` patients were evaluable for the primary endpoint. Mean maximum CRP decline was `r fmt_num(primary_mean)`% (SD `r fmt_num(primary_sd)`%); one-sided one-sample *t*-test *p* = `r fmt_p(primary_p)`. Treatment-related adverse events were predominantly grade 1–2. Exploratory progression-free survival (PFS) and overall survival (OS) were estimable from RECIST assessments and status records: `r n_pfs_events`/`r nrow(surv_pfs)` PFS events and `r n_dead`/`r nrow(surv_os)` deaths (not powered; dedicated PFS/OS forms were largely incomplete).
+**Results:** `r consented_n` patients consented; `r enrolled_n` enrolled and `r screen_fail_n` screen-failed. `r enrolled_original_n` were treated under the original schedule and `r enrolled_amended_n` under the amended schedule. `r evaluable_efficacy_n` patients were evaluable for the primary endpoint. Mean maximum CRP decline was `r fmt_num(primary_mean)`% (SD `r fmt_num(primary_sd)`%); one-sided one-sample *t*-test *p* = `r fmt_p(primary_p)`, not meeting prespecified α = 0.025. Treatment-related adverse events occurred in `r trae_patient_n` of `r enrolled_n` patients (`r fmt_num(trae_patient_pct)`%); all were grade 1–2, most commonly diarrhea (`r trae_diarrhea_n`/`r enrolled_n`, `r fmt_num(trae_diarrhea_pct)`%).
 
-**Conclusion:** In this under-accrued pilot, colchicine 0.6 mg BID was feasible in Cohort 1 with a modest pharmacodynamic signal on CRP in evaluable patients. The trial did not complete planned multi-cohort enrollment; findings are hypothesis-generating. ClinicalTrials.gov identifier: [to be completed].
+**Conclusion:** Colchicine 0.6 mg twice daily was tolerable with modest CRP suppression but did not meet the prespecified primary endpoint. The data do not support colchicine as a re-sensitization strategy in this setting. Trial registration: ClinicalTrials.gov, NCT05279690.
 
-**Key words:** colchicine; C-reactive protein; inflammation; solid tumors; urothelial carcinoma; pilot trial
+**Key words:** colchicine; C-reactive protein; inflammation; solid tumors; pilot trial
 
 ---
 
 ## Lessons Learned
 
-- **Accrual:** Cohort 2 (adjuvant urothelial carcinoma) closed early because of poor accrual; results should not be interpreted as lack of efficacy of the strategy in that setting.
-- **Operational:** Only the Cohort 1 low-dose (BID) sequence enrolled (`r enrolled_n`/`r 30` planned for Cohort 1); high-dose TID and Cohort 2 were not evaluable in this dataset.
-- **Endpoint:** Serial CRP collection at protocol-defined visits is essential; `r enrolled_n - evaluable_efficacy_n` enrolled patient(s) lacked sufficient on-treatment CRP pairs for the primary analysis.
+- **Key outcome:** The prespecified primary CRP endpoint was not met (one-sided *p* = `r fmt_p(primary_p)` vs α = 0.025). With only `r evaluable_efficacy_n` of 15 planned evaluable patients, the trial was underpowered to confirm the observed `r fmt_num(primary_mean)`% mean CRP decline at the prespecified significance threshold.
+- **Key lesson:** Short-course low-dose colchicine was tolerable but yielded only a modest pharmacodynamic signal; future inflammation-modulation pilots in advanced solid tumors will likely need narrower disease selection, less restrictive eligibility, or larger cohorts to draw definitive conclusions.
+- **Key reason:** Accrual lagged because eligible patients were difficult to identify in routine oncology clinics (CRP greater than 5 mg/L plus organ-function requirements), `r screen_fail_n` of `r consented_n` consented patients (`r fmt_num(100 * screen_fail_n / consented_n, 1)`%) screen-failed before treatment (including 2 patient withdrawals, 1 organ dysfunction, and 1 acute clinical deterioration), and the adjuvant urothelial carcinoma cohort closed with zero enrollments.
 
 ---
 
@@ -636,7 +695,15 @@ trial_info <- tibble(
     "Single-center, open-label, non-randomized pilot",
     "Maximum percentage decline in peripheral blood CRP from cycle 1 day 1 during on-study colchicine",
     "CTCAE v5.0 safety; PFS (Cohort 1); DFS/OS (Cohort 2); exploratory cytokines, ctDNA, tissue correlatives",
-    "Cohort 1 low-dose (BID) and high-dose (TID) were sequential; only low-dose enrolled. Cohort 2 closed for poor accrual before enrollment."
+    paste0(
+      "Cohort 1 low-dose (BID) and high-dose (TID) were sequential; only low-dose enrolled. ",
+      "Cohort 2 closed for poor accrual before enrollment. During conduct, the protocol was amended: ",
+      "the first ", enrolled_original_n, " enrolled patients received indefinite on-study colchicine ",
+      "with serial imaging surveillance; the subsequent ", enrolled_amended_n,
+      " enrolled patients received a fixed 2-week colchicine course (phase 0 pharmacodynamic design). ",
+      "Exploratory Kaplan–Meier PFS/OS analyses were restricted to the original-schedule cohort (n = ",
+      km_eligible_n, ")."
+    )
   )
 )
 trial_info %>%
@@ -718,21 +785,36 @@ primary_assess %>%
 
 ## Accrual Disposition
 
-All `r consented_n` subjects who signed informed consent underwent screening evaluation. Enrollment status was recorded on the REDCap screening form (`was_the_subject_enrolled`: 1 = enrolled, 0 = screen failure). When organ-function or CRP thresholds were not met, the report states the clinical failure (e.g., inadequate organ function) and the screening laboratory value when available. REDCap may classify these as “inclusion criteria” screen failures because adequate organ function and CRP elevation are protocol inclusion requirements.
+All `r consented_n` subjects who signed informed consent underwent screening evaluation. Enrollment status was recorded on the REDCap screening form (`was_the_subject_enrolled`: 1 = enrolled, 0 = screen failure). **During trial conduct, a protocol amendment limited on-study colchicine to a fixed 2-week course for patients screened under REDCap Arm 2; patients screened under Arm 1 received the original indefinite on-study schedule with serial imaging surveillance.** `r enrolled_original_n` enrolled patients are Kaplan–Meier–evaluable under the original schedule; `r enrolled_amended_n` enrolled after the amendment contributed to toxicity and primary CRP pharmacodynamic analyses but were excluded from Kaplan–Meier PFS/OS estimates. When organ-function or CRP thresholds were not met, the report states the clinical failure (e.g., inadequate organ function) and the screening laboratory value when available. REDCap may classify these as “inclusion criteria” screen failures because adequate organ function and CRP elevation are protocol inclusion requirements.
 
 ```{r accrual-disposition-table}
 accrual_overview <- tibble(
   Disposition = c(
     "Signed informed consent",
     "Enrolled on study",
-    "Screen failure before enrollment"
+    "  Original schedule (indefinite colchicine + surveillance imaging)",
+    "  Amended schedule (fixed 2-week phase 0 intervention)",
+    "Screen failure before enrollment",
+    "  Before original schedule",
+    "  After protocol amendment"
   ),
-  N = c(consented_n, enrolled_n, screen_fail_n)
+  N = c(
+    consented_n,
+    enrolled_n,
+    enrolled_original_n,
+    enrolled_amended_n,
+    screen_fail_n,
+    screen_fail_original_n,
+    screen_fail_amended_n
+  )
 ) %>%
-  mutate(`N (%)` = if_else(
-    Disposition == "Signed informed consent",
-    as.character(N),
-    paste0(N, " (", trimws(fmt_num(100 * N / consented_n, 1)), "% of consented)")
+  mutate(`N (%)` = case_when(
+    Disposition == "Signed informed consent" ~ as.character(N),
+    Disposition == "Enrolled on study" ~ paste0(N, " (", trimws(fmt_num(100 * N / consented_n, 1)), "% of consented)"),
+    Disposition == "Screen failure before enrollment" ~ paste0(N, " (", trimws(fmt_num(100 * N / consented_n, 1)), "% of consented)"),
+    grepl("^  Original schedule", Disposition) ~ paste0(N, " (Kaplan–Meier–evaluable)"),
+    grepl("^  Amended schedule", Disposition) ~ paste0(N, " (primary CRP / toxicity only)"),
+    TRUE ~ paste0(N, " (", trimws(fmt_num(100 * N / consented_n, 1)), "% of consented)")
   ))
 
 accrual_overview %>%
@@ -903,19 +985,63 @@ crp_endpoint %>%
 ```{r waterfall-plot, fig.cap=fig_cap("Maximum percent decline in C-reactive protein (CRP) from baseline during on-treatment assessment by enrolled patient (Cohort 1 low dose). Abbreviations: CRP, C-reactive protein.")}
 if (nrow(crp_endpoint) > 0) {
   crp_endpoint %>%
-    mutate(study_id = factor(study_id)) %>%
-    ggplot(aes(x = reorder(study_id, max_pct_decline), y = max_pct_decline)) +
-    geom_col(fill = "#2C6FAC") +
-    geom_hline(yintercept = 0, linewidth = 0.3) +
-    coord_flip() +
+    mutate(study_id = reorder(factor(as.character(study_id)), -max_pct_decline)) %>%
+    ggplot(aes(x = study_id, y = max_pct_decline)) +
+    geom_col(width = 0.75, fill = "#2C6FAC") +
+    geom_hline(yintercept = 0, linewidth = 0.4) +
+    scale_y_continuous(expand = expansion(mult = c(0, 0.08))) +
     labs(
       x = "Study ID",
       y = "Maximum CRP decline (%)"
     ) +
-    theme_minimal(base_size = 12)
+    theme_minimal(base_size = 12) +
+    theme(panel.grid.major.x = element_blank())
 } else {
   plot.new()
   text(0.5, 0.5, "No evaluable CRP endpoint data")
+}
+```
+
+```{r tumor-waterfall-plot, fig.cap=fig_cap("Best percent change in target-lesion sum of diameters (SOD) from baseline among all enrolled patients (N = 11). Bars are shown for patients with ≥2 on-study scan sets (n = 5); patients without paired post-baseline target-lesion measurements are labeled NE (not evaluable for % change). Negative values indicate tumor shrinkage. Abbreviations: SOD, sum of diameters; NE, not evaluable.")}
+tumor_waterfall_dat <- tibble(study_id = as.character(enrolled_ids)) %>%
+  left_join(tumor_change, by = "study_id") %>%
+  mutate(
+    evaluable = !is.na(best_pct_change),
+    plot_y = if_else(evaluable, best_pct_change, NA_real_),
+    direction = case_when(
+      !evaluable ~ "NE",
+      best_pct_change < 0 ~ "Shrinkage",
+      TRUE ~ "Growth"
+    ),
+    order_val = if_else(evaluable, best_pct_change, Inf)
+  ) %>%
+  mutate(study_id = reorder(factor(study_id), order_val))
+
+if (nrow(tumor_waterfall_dat) > 0) {
+  ggplot(tumor_waterfall_dat, aes(x = study_id, y = plot_y, fill = direction)) +
+    geom_col(data = ~ filter(.x, evaluable), width = 0.75, na.rm = TRUE) +
+    geom_hline(yintercept = 0, linewidth = 0.4) +
+    geom_text(
+      data = ~ filter(.x, !evaluable),
+      aes(x = study_id, y = 0, label = "NE"),
+      vjust = -0.4,
+      size = 3.2,
+      color = "gray40",
+      inherit.aes = FALSE
+    ) +
+    scale_fill_manual(
+      values = c("Shrinkage" = "#2C6FAC", "Growth" = "#C75B39", "NE" = "gray70"),
+      guide = "none"
+    ) +
+    labs(
+      x = "Study ID",
+      y = "Best % change in target-lesion SOD"
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(panel.grid.major.x = element_blank())
+} else {
+  plot.new()
+  text(0.5, 0.5, "No evaluable tumor-change data")
 }
 ```
 
@@ -1146,15 +1272,17 @@ crp_response %>%
 
 Progression-free survival (PFS) and overall survival (OS) were **not captured on the dedicated REDCap PFS/OS form** in this export (all `subject_progression_status` fields blank). Endpoints below were derived per patient from: (1) RECIST 1.1 best overall response (progressive disease [PD] date); (2) protocol therapy discontinuation for documented progression; (3) final subject status and date of death or last contact. Time zero = first investigational product dispense date, or enrollment if missing.
 
+**Analyses in this section include only the `r km_eligible_n` patients enrolled under the original indefinite colchicine schedule with serial imaging surveillance (REDCap Arm 1).** The `r enrolled_amended_n` patients enrolled after the protocol amendment (fixed 2-week intervention; REDCap Arm 2) lacked the same longitudinal imaging framework and are reported for CRP pharmacodynamics and safety only.
+
 ```{r bor-summary}
 bor_tbl <- surv_dat %>%
   transmute(`Best overall response (RECIST 1.1)` = coalesce(best_recist, "Not assessed")) %>%
   count(`Best overall response (RECIST 1.1)`, name = "N patients") %>%
-  mutate(`N (%)` = paste0(`N patients`, " (", sprintf("%.1f", 100 * `N patients` / enrolled_n), "%)")) %>%
+  mutate(`N (%)` = paste0(`N patients`, " (", sprintf("%.1f", 100 * `N patients` / km_eligible_n), "%)")) %>%
   arrange(desc(`N patients`), `Best overall response (RECIST 1.1)`)
 
 bor_tbl %>%
-  kbl(caption = tbl_cap("Exploratory best overall response (RECIST 1.1) among enrolled patients.")) %>%
+  kbl(caption = tbl_cap("Exploratory best overall response (RECIST 1.1) among original-schedule enrolled patients (Kaplan–Meier cohort).")) %>%
   ctr_table_style()
 ```
 
@@ -1183,19 +1311,22 @@ surv_summary <- tibble(
   )
 )
 surv_summary %>%
-  kbl(caption = tbl_cap("Exploratory progression-free survival and overall survival summary (Kaplan–Meier medians).")) %>%
+  kbl(caption = tbl_cap(paste0(
+    "Exploratory progression-free survival and overall survival summary (Kaplan–Meier medians; original-schedule cohort, n = ",
+    km_eligible_n, ")."
+  ))) %>%
   ctr_table_style()
 ```
 
 ```{r pfs-os-by-patient}
 pfs_os_tbl %>%
   kbl(
-    caption = tbl_cap("Patient-level progression-free survival and overall survival (derived from RECIST, discontinuation, and final status fields).")
+    caption = tbl_cap("Patient-level progression-free survival and overall survival among original-schedule enrolled patients (derived from RECIST, discontinuation, and final status fields).")
   ) %>%
   ctr_table_style()
 ```
 
-```{r km-pfs, fig.cap=fig_cap("Progression-free survival (Kaplan–Meier) from treatment start (exploratory; not powered). PFS events: RECIST PD or discontinuation for progression. Abbreviations: PFS, progression-free survival; PD, progressive disease; RECIST, Response Evaluation Criteria in Solid Tumors."), eval=!is.null(fit_pfs)}
+```{r km-pfs, fig.cap=fig_cap(paste0("Progression-free survival (Kaplan–Meier) from treatment start among patients enrolled under the original indefinite colchicine schedule with surveillance imaging (n = ", km_eligible_n, "; exploratory; not powered). PFS events: RECIST PD or discontinuation for progression. Abbreviations: PFS, progression-free survival; PD, progressive disease; RECIST, Response Evaluation Criteria in Solid Tumors.")), eval=!is.null(fit_pfs)}
 if (!is.null(fit_pfs)) {
   ggsurvplot(
     fit_pfs,
@@ -1211,7 +1342,7 @@ if (!is.null(fit_pfs)) {
 }
 ```
 
-```{r km-os, fig.cap=fig_cap("Overall survival (Kaplan–Meier) from treatment start (exploratory; not powered). Abbreviations: OS, overall survival."), eval=!is.null(fit_os)}
+```{r km-os, fig.cap=fig_cap(paste0("Overall survival (Kaplan–Meier) from treatment start among patients enrolled under the original indefinite colchicine schedule with surveillance imaging (n = ", km_eligible_n, "; exploratory; not powered). Abbreviations: OS, overall survival.")), eval=!is.null(fit_os)}
 if (!is.null(fit_os)) {
   ggsurvplot(
     fit_os,
@@ -1227,23 +1358,25 @@ if (!is.null(fit_os)) {
 }
 ```
 
-*These survival analyses are descriptive and underpowered (pilot N = `r enrolled_n`). Medians and curves should be interpreted cautiously; several patients lack formal final-status forms but have tumor assessment or visit dates used for censoring.*
+*These survival analyses are descriptive and underpowered (Kaplan–Meier cohort n = `r km_eligible_n`; total enrolled n = `r enrolled_n`). Medians and curves should be interpreted cautiously; several patients lack formal final-status forms but have tumor assessment or visit dates used for censoring. Patients enrolled after the protocol amendment (n = `r enrolled_amended_n`) are excluded because they received a fixed 2-week intervention without the same longitudinal imaging surveillance framework.*
+
+---
+
+## Statistical Analysis
+
+Analyses followed protocol v3.0 (Section 12). The primary endpoint was tested with a one-sided one-sample *t*-test (H~0~: mean maximum CRP decline = 0) at α = 0.025 per the Bonferroni-adjusted Cohort 1 low-dose analysis plan. Exploratory progression-free and overall survival estimates used the Kaplan–Meier method (`survival` package in R) among the `r km_eligible_n` patients enrolled under the original indefinite-treatment schedule with serial imaging surveillance (pre-amendment enrollments only). PFS and OS were derived from RECIST 1.1 assessments, protocol therapy discontinuation for progression, and final subject status because dedicated PFS/OS case report forms were incomplete in this export. Treatment-related adverse events required Possible, Probable, or Definite attribution to colchicine and were summarized by CTCAE v5.0 preferred term and worst grade per patient. Primary and exploratory analyses were performed in R per protocol v3.0 Section 12. Annotated R code and primary output are provided in the [statistical analysis file](https://alexanderb95-jpg.github.io/colchicine-ctr-stats/statistical-analysis.html).
 
 ---
 
 ## Discussion
 
-This pilot trial (STUDY-21-001175) was designed to test whether short-course colchicine suppresses peripheral blood CRP as a pharmacodynamic marker of pro-tumorigenic inflammation in advanced solid tumors and in high-risk urothelial carcinoma receiving adjuvant nivolumab. The scientific premise builds on NLRP3–IL-1β biology and translational studies linking myeloid inflammation to checkpoint inhibitor resistance, including work by Tran and colleagues ([PMC13069984](https://pmc.ncbi.nlm.nih.gov/articles/PMC13069984/)) that informed the protocol’s correlative agenda.
+This single-center pilot (STUDY-21-001175) evaluated whether short-course low-dose colchicine could suppress peripheral blood CRP in patients with advanced or recurrent solid tumors. The trial closed under planned accrual: Cohort 1 low dose enrolled `r enrolled_n` patients, the high-dose sequential arm never opened, and Cohort 2 (resected high-risk urothelial carcinoma planned for adjuvant nivolumab) closed before enrollment because of poor accrual.
 
-**Accrual and conduct.** Only the Cohort 1 low-dose (colchicine 0.6 mg BID) group enrolled (`r enrolled_n` patients). The sequential high-dose cohort and Cohort 2 did not enroll in this dataset; **Cohort 2 was closed because of poor accrual**, not because of a pre-specified efficacy or safety stopping rule. This limits generalizability to the adjuvant urothelial setting and precludes the planned dose-comparison and Cohort 2 primary analysis.
+Among `r consented_n` consenting patients, `r screen_fail_n` (`r fmt_num(100 * screen_fail_n / consented_n, 1)`%) were screen failures before enrollment. `r evaluable_efficacy_n` of `r enrolled_n` enrolled patients were evaluable for the primary endpoint. The mean maximum CRP decline was `r fmt_num(primary_mean)`% (SD `r fmt_num(primary_sd)`%). The prespecified one-sided one-sample *t*-test yielded *p* = `r fmt_p(primary_p)`, which does not meet the protocol’s multiplicity-adjusted α = 0.025 threshold.
 
-**Primary endpoint.** Among `r evaluable_efficacy_n` evaluable patients, the mean maximum CRP decline was `r fmt_num(primary_mean)`% (SD `r fmt_num(primary_sd)`%). The prespecified one-sided one-sample *t*-test at α = 0.025 yielded *p* = `r fmt_p(primary_p)`, which does not meet the protocol’s threshold for concluding a statistically significant anti-inflammatory effect in this small, incomplete sample. Individual responses varied, and some patients had rising on-treatment CRP, emphasizing heterogeneity in a heavily pretreated population.
+With `r evaluable_efficacy_n` evaluable patients instead of the planned 15 per low-dose group, post-hoc power to detect the observed effect (Cohen’s d ≈ `r fmt_num(cohens_d_primary, 2)`) at α = 0.025 was approximately `r fmt_num(posthoc_power_pct, 0)`%.
 
-**Safety.** Adverse events were manageable and predominantly low grade, consistent with known colchicine toxicities (gastrointestinal symptoms). Attribution to colchicine should be interpreted cautiously in patients with advanced cancer and concurrent comorbidities.
-
-**Clinical implications.** These results do not establish clinical benefit on tumor endpoints. They provide feasibility and preliminary pharmacodynamic data for colchicine 0.6 mg BID in Cohort 1 only. Whether CRP suppression translates to improved outcomes with systemic therapy remains untested. The trial illustrates the CTR reporting value of publishing under-accrued pilots with explicit lessons learned.
-
-**Next steps.** Future studies would require successful accrual to planned cohorts, standardized CRP sampling, and integration with outcome and correlative endpoints (ctDNA, myeloid signatures) prespecified in the protocol.
+Colchicine 0.6 mg twice daily for 14 days was well tolerated with grade 1–2 treatment-related adverse events only. Exploratory RECIST and Kaplan–Meier analyses were underpowered. These findings provide preliminary biologic proof-of-concept for inflammatory modulation but do not support colchicine as an effective re-sensitization strategy.
 
 ---
 
