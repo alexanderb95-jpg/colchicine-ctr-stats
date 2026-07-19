@@ -1171,7 +1171,7 @@ tumor_waterfall_dat <- tumor_change %>%
     crp_change_lab = case_when(
       is.na(baseline_crp) | is.na(crp_at_imaging) | is.na(crp_pct_change_at_imaging) ~ "NE",
       TRUE ~ paste0(
-        sprintf("%.0f", baseline_crp), " -> ", sprintf("%.0f", crp_at_imaging),
+        sprintf("%.1f", baseline_crp), " -> ", sprintf("%.1f", crp_at_imaging),
         " (",
         if_else(
           crp_pct_change_at_imaging >= 0,

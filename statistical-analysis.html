@@ -1788,7 +1788,7 @@ tumor_waterfall_dat &lt;- tumor_change %&gt;%
     crp_change_lab = case_when(
       is.na(baseline_crp) | is.na(crp_at_imaging) | is.na(crp_pct_change_at_imaging) ~ &quot;NE&quot;,
       TRUE ~ paste0(
-        sprintf(&quot;%.0f&quot;, baseline_crp), &quot; -&gt; &quot;, sprintf(&quot;%.0f&quot;, crp_at_imaging),
+        sprintf(&quot;%.1f&quot;, baseline_crp), &quot; -&gt; &quot;, sprintf(&quot;%.1f&quot;, crp_at_imaging),
         &quot; (&quot;,
         if_else(
           crp_pct_change_at_imaging &gt;= 0,
