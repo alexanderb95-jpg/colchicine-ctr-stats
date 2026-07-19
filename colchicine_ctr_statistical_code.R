@@ -1582,7 +1582,7 @@ if (nrow(crp_endpoint) > 0) {
 }
 
 # =============================================================================
-# R chunk: tumor-waterfall-plot  (, fig.width = 10, fig.height = 5.5, fig.cap=fig_cap("Best percent change in target-lesion sum of diameters (SOD) among patients with ≥2 on-study scans (n = 5). All patients were on the original continued-colchicine schedule (not the amended 2-week course). Companion annotation table follows. Abbreviations: SOD, sum of diameters."))
+# R chunk: tumor-waterfall-plot  (, fig.width = 10, fig.height = 5.8, fig.cap=fig_cap("Best percent change in target-lesion sum of diameters (SOD) on continued colchicine (n = 5; original schedule, not amended 2-week dosing). Only ID 4 had tumor shrinkage; that patient had prior dual checkpoint blockade (ipilimumab + nivolumab) and rising CRP at the best-scan timepoint (exploratory observation). Companion table below. Abbreviations: SOD, sum of diameters; CRP, C-reactive protein; IO, immunotherapy."))
 # =============================================================================
 # Prior IO: concurrent agents joined with "+"; sequential lines show latest only
 io_rx_pat <- "(pembrolizumab|nivolumab|ipilimumab|atezolizumab|durvalumab|avelumab|cemiplimab)"
@@ -1697,7 +1697,8 @@ prior_io <- dat %>%
   ) %>%
   left_join(tx_index, by = "study_id") %>%
   mutate(
-    months_since_last_io = as.numeric(.data$index_date - .data$last_io_dose) / 30.44
+    months_since_last_io = as.numeric(.data$index_date - .data$last_io_dose) / 30.44,
+    dual_io = !is.na(.data$io_regimen) & stringr::str_detect(.data$io_regimen, "\\+")
   )
 
 scan_cd_map <- tumor_change %>%
@@ -1732,13 +1733,10 @@ scan_cd_map <- tumor_change %>%
     crp_cd = cycle_day_label(
       crp_date_at_imaging,
       cycle_starts %>% filter(study_id == .env$study_id)
-    ),
-    best_is_first_scan = !is.na(first_scan_date) &
-      !is.na(imaging_date) &
-      first_scan_date == imaging_date
+    )
   ) %>%
   ungroup() %>%
-  select(study_id, first_scan_cd, scan_cd, crp_cd, best_is_first_scan)
+  select(study_id, first_scan_cd, scan_cd, crp_cd)
 
 tumor_waterfall_dat <- tumor_change %>%
   mutate(study_id = as.character(study_id)) %>%
@@ -1748,17 +1746,25 @@ tumor_waterfall_dat <- tumor_change %>%
     plot_y = best_pct_change,
     direction = if_else(best_pct_change < 0, "Shrinkage", "Growth"),
     bar_lab = sprintf("%+.0f%%", best_pct_change),
-    crp_delta_lab = case_when(
-      is.na(crp_pct_change_at_imaging) ~ "NE",
-      crp_pct_change_at_imaging >= 0 ~
-        paste0("↓", sprintf("%.0f", crp_pct_change_at_imaging), "%"),
-      TRUE ~
-        paste0("↑", sprintf("%.0f", abs(crp_pct_change_at_imaging)), "%")
+    dual_io = dplyr::coalesce(dual_io, FALSE),
+    highlight = best_pct_change < 0 & dual_io,
+    id_lab = if_else(highlight, paste0(study_id, "*"), as.character(study_id)),
+    crp_change_lab = case_when(
+      is.na(baseline_crp) | is.na(crp_at_imaging) | is.na(crp_pct_change_at_imaging) ~ "NE",
+      TRUE ~ paste0(
+        sprintf("%.0f", baseline_crp), " -> ", sprintf("%.0f", crp_at_imaging),
+        " (",
+        if_else(
+          crp_pct_change_at_imaging >= 0,
+          paste0("down ", sprintf("%.0f", crp_pct_change_at_imaging), "%"),
+          paste0("up ", sprintf("%.0f", abs(crp_pct_change_at_imaging)), "%")
+        ),
+        ")"
+      )
     ),
-    prior_io_lab = if_else(
-      is.na(io_regimen) | io_regimen == "",
-      "—",
-      paste0(io_regimen, " (", sprintf("%.1f", months_since_last_io), " mo)")
+    prior_io_lab = case_when(
+      is.na(io_regimen) | io_regimen == "" ~ "None",
+      TRUE ~ paste0(io_regimen, " (", sprintf("%.0f", months_since_last_io), " mo prior)")
     )
   ) %>%
   mutate(study_id = reorder(factor(study_id), best_pct_change))
@@ -1773,33 +1779,42 @@ if (nrow(tumor_waterfall_dat) > 0) {
     geom_text(
       aes(
         label = bar_lab,
-        vjust = if_else(plot_y >= 0, -0.35, 1.35)
+        vjust = if_else(plot_y >= 0, -0.4, 1.4)
       ),
-      size = 5,
+      size = 5.2,
       fontface = "bold"
     ) +
+    scale_x_discrete(labels = setNames(
+      tumor_waterfall_dat$id_lab,
+      as.character(tumor_waterfall_dat$study_id)
+    )) +
     scale_fill_manual(
       values = c("Shrinkage" = "#2C6FAC", "Growth" = "#C75B39"),
       guide = "none"
     ) +
-    scale_y_continuous(expand = expansion(mult = c(0.12, 0.14))) +
+    scale_y_continuous(expand = expansion(mult = c(0.14, 0.16))) +
     labs(
-      title = "Best % change in target-lesion SOD (n = 5)",
-      subtitle = "Original continued colchicine schedule (not amended 2-week dosing)",
+      title = "Best tumor change on continued colchicine (n = 5)",
+      subtitle = "Only shrinkage: ID 4* - prior dual IO (ipi + nivo) with CRP up at that scan (exploratory)",
       x = "Study ID",
-      y = "Best % change from baseline",
-      caption = "Annotation details (scan timing, CRP, prior IO) are in the table below."
+      y = "Best % SOD change",
+      caption = paste0(
+        "*Hypothesis-generating only (n = 5). Primary CRP endpoint was not met overall.\n",
+        "Blue = shrinkage; orange = growth. Details in table."
+      )
     ) +
     theme_minimal(base_size = 18) +
     theme(
       panel.grid.major.x = element_blank(),
       plot.title = element_text(size = 20, face = "bold", hjust = 0),
-      plot.subtitle = element_text(size = 14, face = "bold", color = "#1F4E79", hjust = 0),
+      plot.subtitle = element_text(size = 13, face = "bold", color = "#1F4E79", hjust = 0),
       plot.caption.position = "plot",
-      plot.caption = element_text(size = 12, hjust = 0, color = "#333333", margin = margin(t = 10)),
-      axis.title = element_text(size = 16, face = "bold"),
+      plot.caption = element_text(
+        size = 11, hjust = 0, color = "#444444", lineheight = 1.15, margin = margin(t = 8)
+      ),
+      axis.title = element_text(size = 15, face = "bold"),
       axis.text = element_text(size = 15),
-      plot.margin = margin(10, 14, 12, 10)
+      plot.margin = margin(10, 14, 10, 10)
     )
   print(p_tumor_waterfall)
 } else {
@@ -1814,28 +1829,23 @@ if (nrow(tumor_waterfall_dat) > 0) {
 tumor_annot_tbl <- tumor_waterfall_dat %>%
   arrange(best_pct_change) %>%
   transmute(
-    `Study ID` = as.character(study_id),
-    `Best SOD %` = sprintf("%+.1f", best_pct_change),
-    `First scan` = dplyr::coalesce(first_scan_cd, "NE"),
-    `Best scan` = dplyr::coalesce(scan_cd, "NE"),
-    `CRP baseline` = if_else(is.na(baseline_crp), "NE", sprintf("%.1f", baseline_crp)),
-    `CRP at best-scan draw` = if_else(is.na(crp_at_imaging), "NE", sprintf("%.1f", crp_at_imaging)),
-    `ΔCRP %` = crp_delta_lab,
-    `CRP draw timing` = dplyr::coalesce(crp_cd, "NE"),
-    `Prior IO (mo before start)` = prior_io_lab
+    `Study ID` = if_else(highlight, paste0(as.character(study_id), "*"), as.character(study_id)),
+    `Tumor change` = sprintf("%+.0f%%", best_pct_change),
+    `CRP at that scan` = crp_change_lab,
+    `Prior IO` = prior_io_lab
   )
 
 tumor_annot_tbl %>%
   kbl(caption = tbl_cap(paste0(
-    "Annotation for Figure 2 (waterfall). All patients on original continued-dose schedule. ",
-    "C#D# = calendar days from that cycle’s IP start (may extend past the 14-day dosing block into follow-up). ",
-    "CRP at best-scan draw = CRP nearest the best SOD imaging date (±21 days). ",
-    "Prior IO: concurrent agents joined with “+”; sequential lines show latest agent only. ",
-    "Abbreviations: SOD, sum of diameters; CRP, C-reactive protein (mg/L); IO, immunotherapy; NE, not evaluable."
+    "Figure 2 companion data. Main message: only ID 4* had tumor shrinkage; that patient had prior dual IO ",
+    "and higher CRP at the best-scan timepoint (exploratory; not proof of sensitization). ",
+    "CRP = baseline → value nearest best SOD scan (±21 days). ",
+    "Abbreviations: SOD, sum of diameters; CRP, C-reactive protein (mg/L); IO, immunotherapy."
   ))) %>%
   ctr_table_style() %>%
+  kableExtra::row_spec(1, bold = TRUE, background = "#E8F1FB") %>%
   kableExtra::footnote(
-    general = "Rows ordered left-to-right as in the waterfall (best to worst SOD change).",
+    general = "Rows ordered as in the waterfall (best → worst). Continued-dose schedule only.",
     general_title = ""
   )
 
