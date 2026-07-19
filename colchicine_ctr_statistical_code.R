@@ -1582,7 +1582,7 @@ if (nrow(crp_endpoint) > 0) {
 }
 
 # =============================================================================
-# R chunk: tumor-waterfall-plot  (, fig.width = 12, fig.height = 11.5, fig.cap=fig_cap("Best percent change in target-lesion sum of diameters (SOD) from baseline among enrolled patients with ≥2 on-study scan sets (n = 5). All patients shown were treated under the original protocol schedule (continued/indefinite colchicine with surveillance imaging), not the amended fixed 2-week course. Axis labels under each Study ID show baseline CRP (C1D1), imaging cycle/day from treatment start (C#D#), CRP nearest that scan (±21 days) with its cycle/day, percent change, and prior immunotherapy (if received: concurrent agents shown with “+”; sequential lines show the latest agent only), including months from last immunotherapy dose to colchicine start. Negative SOD values indicate tumor shrinkage. Abbreviations: SOD, sum of diameters; NE, not evaluable; IO, immunotherapy; C#D#, protocol cycle and day from that cycle’s start."))
+# R chunk: tumor-waterfall-plot  (, fig.width = 12, fig.height = 11, fig.cap=fig_cap("Best percent change in target-lesion sum of diameters (SOD) among patients with ≥2 on-study scans (n = 5). All were on the original continued-colchicine schedule (not the amended 2-week course). Labels show CRP at baseline and at the best-response scan (with cycle/day) and prior immunotherapy when applicable. Abbreviations: SOD, sum of diameters; CRP, C-reactive protein; IO, immunotherapy."))
 # =============================================================================
 # Prior IO: concurrent agents joined with "+"; sequential lines show latest only
 io_rx_pat <- "(pembrolizumab|nivolumab|ipilimumab|atezolizumab|durvalumab|avelumab|cemiplimab)"
@@ -1727,24 +1727,24 @@ tumor_waterfall_dat <- tumor_change %>%
       is.na(baseline_crp) | is.na(crp_at_imaging) | is.na(crp_pct_change_at_imaging),
       "CRP NE at scan",
       paste0(
-        "Baseline CRP ", sprintf("%.1f", baseline_crp), " (C1D1)",
-        "\nScan ", dplyr::coalesce(scan_cd, "NE"),
-        "\nCRP at scan ", sprintf("%.1f", crp_at_imaging),
-        " (", dplyr::coalesce(crp_cd, "NE"), ")",
-        "\nΔ ",
+        "CRP ", sprintf("%.1f", baseline_crp), " → ", sprintf("%.1f", crp_at_imaging),
+        " (",
         if_else(
           crp_pct_change_at_imaging >= 0,
           paste0("↓", sprintf("%.0f", crp_pct_change_at_imaging), "%"),
           paste0("↑", sprintf("%.0f", abs(crp_pct_change_at_imaging)), "%")
-        )
+        ),
+        ")",
+        "\nScan ", dplyr::coalesce(scan_cd, "NE"),
+        " · CRP ", dplyr::coalesce(crp_cd, "NE")
       )
     ),
     io_lab = if_else(
       is.na(io_regimen) | io_regimen == "",
       NA_character_,
       paste0(
-        "IO: ", stringr::str_wrap(io_regimen, width = 18),
-        "\nLast IO dose: ", sprintf("%.1f", months_since_last_io), " mo before start"
+        "IO: ", stringr::str_wrap(io_regimen, width = 20),
+        "\n", sprintf("%.1f", months_since_last_io), " mo before start"
       )
     ),
     axis_lab = if_else(
@@ -1757,12 +1757,9 @@ tumor_waterfall_dat <- tumor_change %>%
 
 axis_lab_map <- setNames(tumor_waterfall_dat$axis_lab, as.character(tumor_waterfall_dat$study_id))
 
-tumor_fig_caption <- paste(
-  "All patients shown were enrolled under the original protocol schedule",
-  "(continued/indefinite colchicine with surveillance imaging), not the amended fixed 2-week course.",
-  "Bars: best % change in target-lesion SOD. Labels: baseline CRP (C1D1); scan C#D#;",
-  "CRP nearest scan (±21 d) with C#D#; ΔCRP %; prior IO if any (concurrent = “+”; sequential = latest only).",
-  "Abbreviations: SOD, sum of diameters; CRP, C-reactive protein; IO, immunotherapy; C#D#, cycle/day from that cycle’s start."
+tumor_fig_caption <- paste0(
+  "Continued-dose patients only (original schedule — not the amended 2-week course).\n",
+  "Each bar = best tumor-size change. Labels: CRP baseline → at that scan (% change), with scan/CRP cycle-day; prior IO if any."
 )
 
 if (nrow(tumor_waterfall_dat) > 0) {
@@ -1775,23 +1772,32 @@ if (nrow(tumor_waterfall_dat) > 0) {
       guide = "none"
     ) +
     labs(
-      title = "Best % change in target-lesion SOD",
-      subtitle = "Original schedule only — continued colchicine (not amended 2-week dosing) · n = 5",
+      title = "Best % change in target-lesion SOD (n = 5)",
+      subtitle = "Original continued colchicine schedule (not amended 2-week dosing)",
       x = NULL,
-      y = "Best % change in target-lesion SOD",
-      caption = stringr::str_wrap(tumor_fig_caption, width = 115)
+      y = "Best % change from baseline",
+      caption = tumor_fig_caption
     ) +
     theme_minimal(base_size = 18) +
     theme(
       panel.grid.major.x = element_blank(),
       plot.title = element_text(size = 20, face = "bold", hjust = 0),
       plot.subtitle = element_text(size = 15, face = "bold", color = "#1F4E79", hjust = 0),
-      plot.caption = element_text(size = 12, hjust = 0, lineheight = 1.15, margin = margin(t = 12)),
-      axis.title.y = element_text(size = 18, face = "bold"),
+      plot.caption.position = "plot",
+      plot.caption = element_text(
+        size = 13,
+        hjust = 0,
+        lineheight = 1.2,
+        margin = margin(t = 14),
+        color = "#333333"
+      ),
+      axis.title.y = element_text(size = 17, face = "bold"),
       axis.text.y = element_text(size = 16),
       axis.text.x = element_text(size = 13, lineheight = 1.08, vjust = 1),
-      plot.margin = margin(10, 12, 16, 10)
-    )
+      plot.margin = margin(10, 14, 18, 10)
+    ) +
+    # Force caption to wrap across nearly full figure width
+    ggplot2::coord_cartesian(clip = "off")
 } else {
   plot.new()
   text(0.5, 0.5, "No evaluable tumor-change data")

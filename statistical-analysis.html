@@ -1618,7 +1618,7 @@ if (nrow(crp_endpoint) &gt; 0) {
 }
 
 # =============================================================================
-# R chunk: tumor-waterfall-plot  (, fig.width = 12, fig.height = 11.5, fig.cap=fig_cap(&quot;Best percent change in target-lesion sum of diameters (SOD) from baseline among enrolled patients with ≥2 on-study scan sets (n = 5). All patients shown were treated under the original protocol schedule (continued/indefinite colchicine with surveillance imaging), not the amended fixed 2-week course. Axis labels under each Study ID show baseline CRP (C1D1), imaging cycle/day from treatment start (C#D#), CRP nearest that scan (±21 days) with its cycle/day, percent change, and prior immunotherapy (if received: concurrent agents shown with “+”; sequential lines show the latest agent only), including months from last immunotherapy dose to colchicine start. Negative SOD values indicate tumor shrinkage. Abbreviations: SOD, sum of diameters; NE, not evaluable; IO, immunotherapy; C#D#, protocol cycle and day from that cycle’s start.&quot;))
+# R chunk: tumor-waterfall-plot  (, fig.width = 12, fig.height = 11, fig.cap=fig_cap(&quot;Best percent change in target-lesion sum of diameters (SOD) among patients with ≥2 on-study scans (n = 5). All were on the original continued-colchicine schedule (not the amended 2-week course). Labels show CRP at baseline and at the best-response scan (with cycle/day) and prior immunotherapy when applicable. Abbreviations: SOD, sum of diameters; CRP, C-reactive protein; IO, immunotherapy.&quot;))
 # =============================================================================
 # Prior IO: concurrent agents joined with &quot;+&quot;; sequential lines show latest only
 io_rx_pat &lt;- &quot;(pembrolizumab|nivolumab|ipilimumab|atezolizumab|durvalumab|avelumab|cemiplimab)&quot;
@@ -1763,24 +1763,24 @@ tumor_waterfall_dat &lt;- tumor_change %&gt;%
       is.na(baseline_crp) | is.na(crp_at_imaging) | is.na(crp_pct_change_at_imaging),
       &quot;CRP NE at scan&quot;,
       paste0(
-        &quot;Baseline CRP &quot;, sprintf(&quot;%.1f&quot;, baseline_crp), &quot; (C1D1)&quot;,
-        &quot;\nScan &quot;, dplyr::coalesce(scan_cd, &quot;NE&quot;),
-        &quot;\nCRP at scan &quot;, sprintf(&quot;%.1f&quot;, crp_at_imaging),
-        &quot; (&quot;, dplyr::coalesce(crp_cd, &quot;NE&quot;), &quot;)&quot;,
-        &quot;\nΔ &quot;,
+        &quot;CRP &quot;, sprintf(&quot;%.1f&quot;, baseline_crp), &quot; → &quot;, sprintf(&quot;%.1f&quot;, crp_at_imaging),
+        &quot; (&quot;,
         if_else(
           crp_pct_change_at_imaging &gt;= 0,
           paste0(&quot;↓&quot;, sprintf(&quot;%.0f&quot;, crp_pct_change_at_imaging), &quot;%&quot;),
           paste0(&quot;↑&quot;, sprintf(&quot;%.0f&quot;, abs(crp_pct_change_at_imaging)), &quot;%&quot;)
-        )
+        ),
+        &quot;)&quot;,
+        &quot;\nScan &quot;, dplyr::coalesce(scan_cd, &quot;NE&quot;),
+        &quot; · CRP &quot;, dplyr::coalesce(crp_cd, &quot;NE&quot;)
       )
     ),
     io_lab = if_else(
       is.na(io_regimen) | io_regimen == &quot;&quot;,
       NA_character_,
       paste0(
-        &quot;IO: &quot;, stringr::str_wrap(io_regimen, width = 18),
-        &quot;\nLast IO dose: &quot;, sprintf(&quot;%.1f&quot;, months_since_last_io), &quot; mo before start&quot;
+        &quot;IO: &quot;, stringr::str_wrap(io_regimen, width = 20),
+        &quot;\n&quot;, sprintf(&quot;%.1f&quot;, months_since_last_io), &quot; mo before start&quot;
       )
     ),
     axis_lab = if_else(
@@ -1793,12 +1793,9 @@ tumor_waterfall_dat &lt;- tumor_change %&gt;%
 
 axis_lab_map &lt;- setNames(tumor_waterfall_dat$axis_lab, as.character(tumor_waterfall_dat$study_id))
 
-tumor_fig_caption &lt;- paste(
-  &quot;All patients shown were enrolled under the original protocol schedule&quot;,
-  &quot;(continued/indefinite colchicine with surveillance imaging), not the amended fixed 2-week course.&quot;,
-  &quot;Bars: best % change in target-lesion SOD. Labels: baseline CRP (C1D1); scan C#D#;&quot;,
-  &quot;CRP nearest scan (±21 d) with C#D#; ΔCRP %; prior IO if any (concurrent = “+”; sequential = latest only).&quot;,
-  &quot;Abbreviations: SOD, sum of diameters; CRP, C-reactive protein; IO, immunotherapy; C#D#, cycle/day from that cycle’s start.&quot;
+tumor_fig_caption &lt;- paste0(
+  &quot;Continued-dose patients only (original schedule — not the amended 2-week course).\n&quot;,
+  &quot;Each bar = best tumor-size change. Labels: CRP baseline → at that scan (% change), with scan/CRP cycle-day; prior IO if any.&quot;
 )
 
 if (nrow(tumor_waterfall_dat) &gt; 0) {
@@ -1811,23 +1808,32 @@ if (nrow(tumor_waterfall_dat) &gt; 0) {
       guide = &quot;none&quot;
     ) +
     labs(
-      title = &quot;Best % change in target-lesion SOD&quot;,
-      subtitle = &quot;Original schedule only — continued colchicine (not amended 2-week dosing) · n = 5&quot;,
+      title = &quot;Best % change in target-lesion SOD (n = 5)&quot;,
+      subtitle = &quot;Original continued colchicine schedule (not amended 2-week dosing)&quot;,
       x = NULL,
-      y = &quot;Best % change in target-lesion SOD&quot;,
-      caption = stringr::str_wrap(tumor_fig_caption, width = 115)
+      y = &quot;Best % change from baseline&quot;,
+      caption = tumor_fig_caption
     ) +
     theme_minimal(base_size = 18) +
     theme(
       panel.grid.major.x = element_blank(),
       plot.title = element_text(size = 20, face = &quot;bold&quot;, hjust = 0),
       plot.subtitle = element_text(size = 15, face = &quot;bold&quot;, color = &quot;#1F4E79&quot;, hjust = 0),
-      plot.caption = element_text(size = 12, hjust = 0, lineheight = 1.15, margin = margin(t = 12)),
-      axis.title.y = element_text(size = 18, face = &quot;bold&quot;),
+      plot.caption.position = &quot;plot&quot;,
+      plot.caption = element_text(
+        size = 13,
+        hjust = 0,
+        lineheight = 1.2,
+        margin = margin(t = 14),
+        color = &quot;#333333&quot;
+      ),
+      axis.title.y = element_text(size = 17, face = &quot;bold&quot;),
       axis.text.y = element_text(size = 16),
       axis.text.x = element_text(size = 13, lineheight = 1.08, vjust = 1),
-      plot.margin = margin(10, 12, 16, 10)
-    )
+      plot.margin = margin(10, 14, 18, 10)
+    ) +
+    # Force caption to wrap across nearly full figure width
+    ggplot2::coord_cartesian(clip = &quot;off&quot;)
 } else {
   plot.new()
   text(0.5, 0.5, &quot;No evaluable tumor-change data&quot;)
