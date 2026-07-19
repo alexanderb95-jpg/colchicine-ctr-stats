@@ -511,7 +511,11 @@ build_protocol2101175_survival <- function(dat, enrolled_ids) {
 #' to 1. First set = baseline; subsequent sets = post-baseline. Best % change is the
 #' minimum post-baseline change (most negative = maximum shrinkage). Patients with
 #' fewer than 2 scan sets are excluded.
-build_protocol2101175_tumor_change <- function(dat, enrolled_ids) {
+#'
+#' Also returns CRP at the imaging timepoint corresponding to the best SOD change:
+#' post-baseline scan sets are matched in order to sorted target-lesion/BOR assessment
+#' dates, and CRP is taken as the closest CRP date within \code{crp_window_days}.
+build_protocol2101175_tumor_change <- function(dat, enrolled_ids, crp_window_days = 21) {
   les <- dat %>%
     dplyr::filter(
       .data$study_id %in% enrolled_ids,
@@ -524,15 +528,21 @@ build_protocol2101175_tumor_change <- function(dat, enrolled_ids) {
     dplyr::filter(!is.na(.data$ld), !is.na(.data$lesion_number_t)) %>%
     dplyr::arrange(.data$study_id, .data$redcap_repeat_instance)
 
-  if (nrow(les) == 0) {
-    return(tibble::tibble(
-      study_id = character(),
-      baseline_sod = numeric(),
-      best_pct_change = numeric(),
-      max_shrinkage_pct = numeric(),
-      n_post_scans = integer()
-    ))
-  }
+  empty <- tibble::tibble(
+    study_id = character(),
+    baseline_sod = numeric(),
+    best_pct_change = numeric(),
+    max_shrinkage_pct = numeric(),
+    n_post_scans = integer(),
+    best_scan_set = integer(),
+    imaging_date = as.Date(character()),
+    baseline_crp = numeric(),
+    crp_at_imaging = numeric(),
+    crp_date_at_imaging = as.Date(character()),
+    crp_pct_change_at_imaging = numeric()
+  )
+
+  if (nrow(les) == 0) return(empty)
 
   assign_scan_sets <- function(df) {
     ln <- df$lesion_number_t
@@ -552,7 +562,7 @@ build_protocol2101175_tumor_change <- function(dat, enrolled_ids) {
     df
   }
 
-  les %>%
+  sod_long <- les %>%
     split(.$study_id) %>%
     lapply(assign_scan_sets) %>%
     dplyr::bind_rows() %>%
@@ -570,15 +580,124 @@ build_protocol2101175_tumor_change <- function(dat, enrolled_ids) {
         100 * (.data$sod - .data$baseline_sod) / .data$baseline_sod
       )
     ) %>%
+    dplyr::ungroup()
+
+  tumor <- sod_long %>%
     dplyr::filter(!is.na(.data$pct_change)) %>%
+    dplyr::group_by(.data$study_id) %>%
     dplyr::summarise(
       baseline_sod = dplyr::first(.data$baseline_sod),
       best_pct_change = min(.data$pct_change, na.rm = TRUE),
       max_shrinkage_pct = pmax(-min(.data$pct_change, na.rm = TRUE), 0),
       n_post_scans = dplyr::n(),
+      best_scan_set = .data$scan_set[which.min(.data$pct_change)][[1]],
       .groups = "drop"
-    ) %>%
+    )
+
+  if (nrow(tumor) == 0) return(empty)
+
+  # Assessment dates: target-lesion eval and BOR dates, sorted per patient
+  assess_dates <- dat %>%
+    dplyr::filter(.data$study_id %in% tumor$study_id) %>%
     dplyr::mutate(study_id = as.character(.data$study_id)) %>%
+    dplyr::transmute(
+      study_id,
+      assess_date = dplyr::coalesce(
+        .data$date_of_target_lesions_eva,
+        .data$date_of_overall_response
+      )
+    ) %>%
+    dplyr::filter(!is.na(.data$assess_date)) %>%
+    dplyr::distinct() %>%
+    dplyr::arrange(.data$study_id, .data$assess_date) %>%
+    dplyr::group_by(.data$study_id) %>%
+    dplyr::mutate(post_scan_idx = dplyr::row_number()) %>%
+    dplyr::ungroup()
+
+  # Map best post-baseline scan_set (2,3,...) -> 1st, 2nd, ... assessment date
+  tumor <- tumor %>%
+    dplyr::mutate(post_scan_idx = as.integer(.data$best_scan_set) - 1L) %>%
+    dplyr::left_join(assess_dates, by = c("study_id", "post_scan_idx")) %>%
+    dplyr::rename(imaging_date = .data$assess_date)
+
+  baseline_events <- c(
+    "cycle_1_day_1__3_d_arm_1", "cycle_1_day_1_arm_2", "cycle_1_day_1_arm_3"
+  )
+  screening_events <- c(
+    "screening_28_days_arm_1", "screening_arm_2", "screening_arm_3"
+  )
+
+  crp_rows <- dat %>%
+    dplyr::filter(.data$study_id %in% tumor$study_id) %>%
+    dplyr::mutate(
+      study_id = as.character(.data$study_id),
+      crp_value = suppressWarnings(as.numeric(.data$c_reactive_protein_value)),
+      crp_date = .data$date_c_reactive_protein_co
+    ) %>%
+    dplyr::filter(!is.na(.data$crp_value), !is.na(.data$crp_date)) %>%
+    dplyr::select(study_id, redcap_event_name, crp_value, crp_date)
+
+  pick_baseline_crp <- function(id) {
+    sub <- crp_rows %>% dplyr::filter(.data$study_id == id)
+    base <- sub %>%
+      dplyr::filter(.data$redcap_event_name %in% baseline_events) %>%
+      dplyr::arrange(.data$crp_date) %>%
+      dplyr::slice(1)
+    if (nrow(base) == 0) {
+      base <- sub %>%
+        dplyr::filter(.data$redcap_event_name %in% screening_events) %>%
+        dplyr::arrange(.data$crp_date) %>%
+        dplyr::slice(1)
+    }
+    if (nrow(base) == 0) {
+      return(list(value = NA_real_, date = as.Date(NA)))
+    }
+    list(value = base$crp_value[[1]], date = base$crp_date[[1]])
+  }
+
+  pick_crp_at_imaging <- function(id, imaging_date) {
+    if (is.na(imaging_date)) {
+      return(list(value = NA_real_, date = as.Date(NA)))
+    }
+    sub <- crp_rows %>% dplyr::filter(.data$study_id == id)
+    if (nrow(sub) == 0) {
+      return(list(value = NA_real_, date = as.Date(NA)))
+    }
+    sub <- sub %>%
+      dplyr::mutate(abs_days = abs(as.numeric(.data$crp_date - imaging_date))) %>%
+      dplyr::filter(.data$abs_days <= crp_window_days) %>%
+      dplyr::arrange(.data$abs_days, .data$crp_date)
+    if (nrow(sub) == 0) {
+      return(list(value = NA_real_, date = as.Date(NA)))
+    }
+    list(value = sub$crp_value[[1]], date = sub$crp_date[[1]])
+  }
+
+  tumor$baseline_crp <- NA_real_
+  tumor$crp_at_imaging <- NA_real_
+  tumor$crp_date_at_imaging <- as.Date(NA)
+  for (i in seq_len(nrow(tumor))) {
+    b <- pick_baseline_crp(tumor$study_id[[i]])
+    tumor$baseline_crp[[i]] <- b$value
+    cimg <- pick_crp_at_imaging(tumor$study_id[[i]], tumor$imaging_date[[i]])
+    tumor$crp_at_imaging[[i]] <- cimg$value
+    tumor$crp_date_at_imaging[[i]] <- cimg$date
+  }
+
+  tumor %>%
+    dplyr::mutate(
+      crp_pct_change_at_imaging = dplyr::if_else(
+        !is.na(.data$baseline_crp) & .data$baseline_crp > 0 & !is.na(.data$crp_at_imaging),
+        100 * (.data$baseline_crp - .data$crp_at_imaging) / .data$baseline_crp,
+        NA_real_
+      ),
+      study_id = as.character(.data$study_id)
+    ) %>%
+    dplyr::select(
+      study_id, baseline_sod, best_pct_change, max_shrinkage_pct, n_post_scans,
+      best_scan_set, imaging_date, baseline_crp, crp_at_imaging, crp_date_at_imaging,
+      crp_pct_change_at_imaging
+    ) %>%
     dplyr::arrange(.data$study_id)
 }
 

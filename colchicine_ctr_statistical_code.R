@@ -519,7 +519,11 @@ build_protocol2101175_survival <- function(dat, enrolled_ids) {
 #' to 1. First set = baseline; subsequent sets = post-baseline. Best % change is the
 #' minimum post-baseline change (most negative = maximum shrinkage). Patients with
 #' fewer than 2 scan sets are excluded.
-build_protocol2101175_tumor_change <- function(dat, enrolled_ids) {
+#'
+#' Also returns CRP at the imaging timepoint corresponding to the best SOD change:
+#' post-baseline scan sets are matched in order to sorted target-lesion/BOR assessment
+#' dates, and CRP is taken as the closest CRP date within \code{crp_window_days}.
+build_protocol2101175_tumor_change <- function(dat, enrolled_ids, crp_window_days = 21) {
   les <- dat %>%
     dplyr::filter(
       .data$study_id %in% enrolled_ids,
@@ -532,15 +536,21 @@ build_protocol2101175_tumor_change <- function(dat, enrolled_ids) {
     dplyr::filter(!is.na(.data$ld), !is.na(.data$lesion_number_t)) %>%
     dplyr::arrange(.data$study_id, .data$redcap_repeat_instance)
 
-  if (nrow(les) == 0) {
-    return(tibble::tibble(
-      study_id = character(),
-      baseline_sod = numeric(),
-      best_pct_change = numeric(),
-      max_shrinkage_pct = numeric(),
-      n_post_scans = integer()
-    ))
-  }
+  empty <- tibble::tibble(
+    study_id = character(),
+    baseline_sod = numeric(),
+    best_pct_change = numeric(),
+    max_shrinkage_pct = numeric(),
+    n_post_scans = integer(),
+    best_scan_set = integer(),
+    imaging_date = as.Date(character()),
+    baseline_crp = numeric(),
+    crp_at_imaging = numeric(),
+    crp_date_at_imaging = as.Date(character()),
+    crp_pct_change_at_imaging = numeric()
+  )
+
+  if (nrow(les) == 0) return(empty)
 
   assign_scan_sets <- function(df) {
     ln <- df$lesion_number_t
@@ -560,7 +570,7 @@ build_protocol2101175_tumor_change <- function(dat, enrolled_ids) {
     df
   }
 
-  les %>%
+  sod_long <- les %>%
     split(.$study_id) %>%
     lapply(assign_scan_sets) %>%
     dplyr::bind_rows() %>%
@@ -578,15 +588,124 @@ build_protocol2101175_tumor_change <- function(dat, enrolled_ids) {
         100 * (.data$sod - .data$baseline_sod) / .data$baseline_sod
       )
     ) %>%
+    dplyr::ungroup()
+
+  tumor <- sod_long %>%
     dplyr::filter(!is.na(.data$pct_change)) %>%
+    dplyr::group_by(.data$study_id) %>%
     dplyr::summarise(
       baseline_sod = dplyr::first(.data$baseline_sod),
       best_pct_change = min(.data$pct_change, na.rm = TRUE),
       max_shrinkage_pct = pmax(-min(.data$pct_change, na.rm = TRUE), 0),
       n_post_scans = dplyr::n(),
+      best_scan_set = .data$scan_set[which.min(.data$pct_change)][[1]],
       .groups = "drop"
-    ) %>%
+    )
+
+  if (nrow(tumor) == 0) return(empty)
+
+  # Assessment dates: target-lesion eval and BOR dates, sorted per patient
+  assess_dates <- dat %>%
+    dplyr::filter(.data$study_id %in% tumor$study_id) %>%
     dplyr::mutate(study_id = as.character(.data$study_id)) %>%
+    dplyr::transmute(
+      study_id,
+      assess_date = dplyr::coalesce(
+        .data$date_of_target_lesions_eva,
+        .data$date_of_overall_response
+      )
+    ) %>%
+    dplyr::filter(!is.na(.data$assess_date)) %>%
+    dplyr::distinct() %>%
+    dplyr::arrange(.data$study_id, .data$assess_date) %>%
+    dplyr::group_by(.data$study_id) %>%
+    dplyr::mutate(post_scan_idx = dplyr::row_number()) %>%
+    dplyr::ungroup()
+
+  # Map best post-baseline scan_set (2,3,...) -> 1st, 2nd, ... assessment date
+  tumor <- tumor %>%
+    dplyr::mutate(post_scan_idx = as.integer(.data$best_scan_set) - 1L) %>%
+    dplyr::left_join(assess_dates, by = c("study_id", "post_scan_idx")) %>%
+    dplyr::rename(imaging_date = .data$assess_date)
+
+  baseline_events <- c(
+    "cycle_1_day_1__3_d_arm_1", "cycle_1_day_1_arm_2", "cycle_1_day_1_arm_3"
+  )
+  screening_events <- c(
+    "screening_28_days_arm_1", "screening_arm_2", "screening_arm_3"
+  )
+
+  crp_rows <- dat %>%
+    dplyr::filter(.data$study_id %in% tumor$study_id) %>%
+    dplyr::mutate(
+      study_id = as.character(.data$study_id),
+      crp_value = suppressWarnings(as.numeric(.data$c_reactive_protein_value)),
+      crp_date = .data$date_c_reactive_protein_co
+    ) %>%
+    dplyr::filter(!is.na(.data$crp_value), !is.na(.data$crp_date)) %>%
+    dplyr::select(study_id, redcap_event_name, crp_value, crp_date)
+
+  pick_baseline_crp <- function(id) {
+    sub <- crp_rows %>% dplyr::filter(.data$study_id == id)
+    base <- sub %>%
+      dplyr::filter(.data$redcap_event_name %in% baseline_events) %>%
+      dplyr::arrange(.data$crp_date) %>%
+      dplyr::slice(1)
+    if (nrow(base) == 0) {
+      base <- sub %>%
+        dplyr::filter(.data$redcap_event_name %in% screening_events) %>%
+        dplyr::arrange(.data$crp_date) %>%
+        dplyr::slice(1)
+    }
+    if (nrow(base) == 0) {
+      return(list(value = NA_real_, date = as.Date(NA)))
+    }
+    list(value = base$crp_value[[1]], date = base$crp_date[[1]])
+  }
+
+  pick_crp_at_imaging <- function(id, imaging_date) {
+    if (is.na(imaging_date)) {
+      return(list(value = NA_real_, date = as.Date(NA)))
+    }
+    sub <- crp_rows %>% dplyr::filter(.data$study_id == id)
+    if (nrow(sub) == 0) {
+      return(list(value = NA_real_, date = as.Date(NA)))
+    }
+    sub <- sub %>%
+      dplyr::mutate(abs_days = abs(as.numeric(.data$crp_date - imaging_date))) %>%
+      dplyr::filter(.data$abs_days <= crp_window_days) %>%
+      dplyr::arrange(.data$abs_days, .data$crp_date)
+    if (nrow(sub) == 0) {
+      return(list(value = NA_real_, date = as.Date(NA)))
+    }
+    list(value = sub$crp_value[[1]], date = sub$crp_date[[1]])
+  }
+
+  tumor$baseline_crp <- NA_real_
+  tumor$crp_at_imaging <- NA_real_
+  tumor$crp_date_at_imaging <- as.Date(NA)
+  for (i in seq_len(nrow(tumor))) {
+    b <- pick_baseline_crp(tumor$study_id[[i]])
+    tumor$baseline_crp[[i]] <- b$value
+    cimg <- pick_crp_at_imaging(tumor$study_id[[i]], tumor$imaging_date[[i]])
+    tumor$crp_at_imaging[[i]] <- cimg$value
+    tumor$crp_date_at_imaging[[i]] <- cimg$date
+  }
+
+  tumor %>%
+    dplyr::mutate(
+      crp_pct_change_at_imaging = dplyr::if_else(
+        !is.na(.data$baseline_crp) & .data$baseline_crp > 0 & !is.na(.data$crp_at_imaging),
+        100 * (.data$baseline_crp - .data$crp_at_imaging) / .data$baseline_crp,
+        NA_real_
+      ),
+      study_id = as.character(.data$study_id)
+    ) %>%
+    dplyr::select(
+      study_id, baseline_sod, best_pct_change, max_shrinkage_pct, n_post_scans,
+      best_scan_set, imaging_date, baseline_crp, crp_at_imaging, crp_date_at_imaging,
+      crp_pct_change_at_imaging
+    ) %>%
     dplyr::arrange(.data$study_id)
 }
 
@@ -1463,10 +1582,14 @@ if (nrow(crp_endpoint) > 0) {
 }
 
 # =============================================================================
-# R chunk: tumor-waterfall-plot  (, fig.width = 11, fig.height = 8, fig.cap=fig_cap("Best percent change in target-lesion sum of diameters (SOD) from baseline among enrolled patients with ≥2 on-study scan sets (n = 5). Axis labels under each Study ID show maximum on-treatment CRP decline (primary endpoint definition; CRP NE if no cycle 1 post-baseline CRP) and prior immunotherapy (if received), including months from last immunotherapy dose to colchicine start. Negative SOD values indicate tumor shrinkage. Abbreviations: SOD, sum of diameters; NE, not evaluable; IO, immunotherapy."))
+# R chunk: tumor-waterfall-plot  (, fig.width = 12, fig.height = 11.5, fig.cap=fig_cap("Best percent change in target-lesion sum of diameters (SOD) from baseline among enrolled patients with ≥2 on-study scan sets (n = 5). All patients shown were treated under the original protocol schedule (continued/indefinite colchicine with surveillance imaging), not the amended fixed 2-week course. Axis labels under each Study ID show baseline CRP (C1D1), imaging cycle/day from treatment start (C#D#), CRP nearest that scan (±21 days) with its cycle/day, percent change, and prior immunotherapy (if received: concurrent agents shown with “+”; sequential lines show the latest agent only), including months from last immunotherapy dose to colchicine start. Negative SOD values indicate tumor shrinkage. Abbreviations: SOD, sum of diameters; NE, not evaluable; IO, immunotherapy; C#D#, protocol cycle and day from that cycle’s start."))
 # =============================================================================
-# Prior immunotherapy regimen + months since last IO dose (to colchicine start)
+# Prior IO: concurrent agents joined with "+"; sequential lines show latest only
 io_rx_pat <- "(pembrolizumab|nivolumab|ipilimumab|atezolizumab|durvalumab|avelumab|cemiplimab)"
+io_display_order <- c(
+  "ipilimumab", "nivolumab", "pembrolizumab", "atezolizumab",
+  "durvalumab", "avelumab", "cemiplimab"
+)
 normalize_io <- function(x) {
   dplyr::recode(
     tolower(x),
@@ -1477,6 +1600,67 @@ normalize_io <- function(x) {
     .default = tolower(x)
   )
 }
+format_latest_io_regimen <- function(drugs, start_dt, end_dt) {
+  drugs <- normalize_io(drugs)
+  n <- length(drugs)
+  if (n == 0) return(NA_character_)
+  if (n == 1) return(drugs[[1]])
+  ord <- order(start_dt, drugs)
+  drugs <- drugs[ord]
+  start_dt <- start_dt[ord]
+  end_dt <- end_dt[ord]
+  line_id <- integer(n)
+  line_id[[1]] <- 1L
+  cur_line <- 1L
+  for (i in seq_len(n)[-1]) {
+    overlaps_cur <- any(
+      start_dt[[i]] <= end_dt[line_id == cur_line] &
+        start_dt[line_id == cur_line] <= end_dt[[i]]
+    )
+    if (overlaps_cur) {
+      line_id[[i]] <- cur_line
+    } else {
+      cur_line <- cur_line + 1L
+      line_id[[i]] <- cur_line
+    }
+  }
+  line_end <- vapply(unique(line_id), function(L) max(end_dt[line_id == L]), as.Date(NA))
+  latest_line <- unique(line_id)[which.max(line_end)]
+  latest_drugs <- unique(drugs[line_id == latest_line])
+  latest_drugs <- latest_drugs[order(match(latest_drugs, io_display_order))]
+  paste(latest_drugs, collapse = " + ")
+}
+# Cycle/day from C1D1 / subsequent cycle starts (IP dispense dates)
+cycle_day_label <- function(dt, cycle_df) {
+  if (is.na(dt) || nrow(cycle_df) == 0) return(NA_character_)
+  eligible <- cycle_df %>% dplyr::filter(.data$cycle_start <= dt)
+  if (nrow(eligible) == 0) return(NA_character_)
+  row <- eligible %>% dplyr::slice_max(.data$cycle_start, n = 1, with_ties = FALSE)
+  day <- as.integer(dt - row$cycle_start[[1]]) + 1L
+  paste0("C", row$cycle[[1]], "D", day)
+}
+
+cycle_starts <- dat %>%
+  filter(
+    study_id %in% as.character(tumor_change$study_id),
+    !is.na(date_ip_dispensed)
+  ) %>%
+  mutate(
+    study_id = as.character(study_id),
+    cycle = dplyr::case_when(
+      stringr::str_detect(redcap_event_name, "cycle_1") ~ 1L,
+      stringr::str_detect(redcap_event_name, "cycle_2") ~ 2L,
+      stringr::str_detect(redcap_event_name, "cycle_3") ~ 3L,
+      stringr::str_detect(redcap_event_name, "cycle_4") ~ 4L,
+      stringr::str_detect(redcap_event_name, "cycle_5") ~ 5L,
+      stringr::str_detect(redcap_event_name, "cycle_6") ~ 6L,
+      TRUE ~ NA_integer_
+    )
+  ) %>%
+  filter(!is.na(cycle)) %>%
+  group_by(study_id, cycle) %>%
+  summarise(cycle_start = min(date_ip_dispensed), .groups = "drop")
+
 tx_index <- dat %>%
   filter(study_id %in% as.character(tumor_change$study_id)) %>%
   group_by(study_id = as.character(study_id)) %>%
@@ -1507,7 +1691,7 @@ prior_io <- dat %>%
   arrange(study_id, .data$start_dt, .data$drug) %>%
   group_by(study_id) %>%
   summarise(
-    io_regimen = paste(unique(normalize_io(.data$drug)), collapse = " → "),
+    io_regimen = format_latest_io_regimen(.data$drug, .data$start_dt, .data$end_dt),
     last_io_dose = max(.data$end_dt, na.rm = TRUE),
     .groups = "drop"
   ) %>%
@@ -1516,20 +1700,44 @@ prior_io <- dat %>%
     months_since_last_io = as.numeric(.data$index_date - .data$last_io_dose) / 30.44
   )
 
+scan_cd_map <- tumor_change %>%
+  mutate(study_id = as.character(study_id)) %>%
+  rowwise() %>%
+  mutate(
+    scan_cd = cycle_day_label(
+      imaging_date,
+      cycle_starts %>% filter(study_id == .env$study_id)
+    ),
+    crp_cd = cycle_day_label(
+      crp_date_at_imaging,
+      cycle_starts %>% filter(study_id == .env$study_id)
+    )
+  ) %>%
+  ungroup() %>%
+  select(study_id, scan_cd, crp_cd)
+
 tumor_waterfall_dat <- tumor_change %>%
   mutate(study_id = as.character(study_id)) %>%
-  left_join(
-    crp_endpoint %>% transmute(study_id = as.character(study_id), max_pct_decline),
-    by = "study_id"
-  ) %>%
   left_join(prior_io, by = "study_id") %>%
+  left_join(scan_cd_map, by = "study_id") %>%
   mutate(
     plot_y = best_pct_change,
     direction = if_else(best_pct_change < 0, "Shrinkage", "Growth"),
     crp_lab = if_else(
-      is.na(max_pct_decline),
-      "CRP NE",
-      paste0("CRP ↓", sprintf("%.0f", max_pct_decline), "%")
+      is.na(baseline_crp) | is.na(crp_at_imaging) | is.na(crp_pct_change_at_imaging),
+      "CRP NE at scan",
+      paste0(
+        "Baseline CRP ", sprintf("%.1f", baseline_crp), " (C1D1)",
+        "\nScan ", dplyr::coalesce(scan_cd, "NE"),
+        "\nCRP at scan ", sprintf("%.1f", crp_at_imaging),
+        " (", dplyr::coalesce(crp_cd, "NE"), ")",
+        "\nΔ ",
+        if_else(
+          crp_pct_change_at_imaging >= 0,
+          paste0("↓", sprintf("%.0f", crp_pct_change_at_imaging), "%"),
+          paste0("↑", sprintf("%.0f", abs(crp_pct_change_at_imaging)), "%")
+        )
+      )
     ),
     io_lab = if_else(
       is.na(io_regimen) | io_regimen == "",
@@ -1549,6 +1757,14 @@ tumor_waterfall_dat <- tumor_change %>%
 
 axis_lab_map <- setNames(tumor_waterfall_dat$axis_lab, as.character(tumor_waterfall_dat$study_id))
 
+tumor_fig_caption <- paste(
+  "All patients shown were enrolled under the original protocol schedule",
+  "(continued/indefinite colchicine with surveillance imaging), not the amended fixed 2-week course.",
+  "Bars: best % change in target-lesion SOD. Labels: baseline CRP (C1D1); scan C#D#;",
+  "CRP nearest scan (±21 d) with C#D#; ΔCRP %; prior IO if any (concurrent = “+”; sequential = latest only).",
+  "Abbreviations: SOD, sum of diameters; CRP, C-reactive protein; IO, immunotherapy; C#D#, cycle/day from that cycle’s start."
+)
+
 if (nrow(tumor_waterfall_dat) > 0) {
   ggplot(tumor_waterfall_dat, aes(x = study_id, y = plot_y, fill = direction)) +
     geom_col(width = 0.65) +
@@ -1559,16 +1775,22 @@ if (nrow(tumor_waterfall_dat) > 0) {
       guide = "none"
     ) +
     labs(
+      title = "Best % change in target-lesion SOD",
+      subtitle = "Original schedule only — continued colchicine (not amended 2-week dosing) · n = 5",
       x = NULL,
-      y = "Best % change in target-lesion SOD"
+      y = "Best % change in target-lesion SOD",
+      caption = stringr::str_wrap(tumor_fig_caption, width = 115)
     ) +
     theme_minimal(base_size = 18) +
     theme(
       panel.grid.major.x = element_blank(),
+      plot.title = element_text(size = 20, face = "bold", hjust = 0),
+      plot.subtitle = element_text(size = 15, face = "bold", color = "#1F4E79", hjust = 0),
+      plot.caption = element_text(size = 12, hjust = 0, lineheight = 1.15, margin = margin(t = 12)),
       axis.title.y = element_text(size = 18, face = "bold"),
       axis.text.y = element_text(size = 16),
-      axis.text.x = element_text(size = 13, lineheight = 1.05, vjust = 1),
-      plot.margin = margin(8, 8, 24, 8)
+      axis.text.x = element_text(size = 13, lineheight = 1.08, vjust = 1),
+      plot.margin = margin(10, 12, 16, 10)
     )
 } else {
   plot.new()
