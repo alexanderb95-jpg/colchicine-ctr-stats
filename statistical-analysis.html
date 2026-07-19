@@ -1618,7 +1618,7 @@ if (nrow(crp_endpoint) &gt; 0) {
 }
 
 # =============================================================================
-# R chunk: tumor-waterfall-plot  (, fig.width = 12, fig.height = 11.5, fig.cap=fig_cap(&quot;Best percent change in target-lesion sum of diameters (SOD) among patients with ≥2 on-study scans (n = 5). All were on the original continued-colchicine schedule (not the amended 2-week course). Labels show CRP at baseline versus at the best-response scan, first versus best scan timing (cycle/day), and prior immunotherapy when applicable. Abbreviations: SOD, sum of diameters; CRP, C-reactive protein; IO, immunotherapy.&quot;))
+# R chunk: tumor-waterfall-plot  (, fig.width = 10, fig.height = 5.5, fig.cap=fig_cap(&quot;Best percent change in target-lesion sum of diameters (SOD) among patients with ≥2 on-study scans (n = 5). All patients were on the original continued-colchicine schedule (not the amended 2-week course). Companion annotation table follows. Abbreviations: SOD, sum of diameters.&quot;))
 # =============================================================================
 # Prior IO: concurrent agents joined with &quot;+&quot;; sequential lines show latest only
 io_rx_pat &lt;- &quot;(pembrolizumab|nivolumab|ipilimumab|atezolizumab|durvalumab|avelumab|cemiplimab)&quot;
@@ -1666,7 +1666,7 @@ format_latest_io_regimen &lt;- function(drugs, start_dt, end_dt) {
   latest_drugs &lt;- latest_drugs[order(match(latest_drugs, io_display_order))]
   paste(latest_drugs, collapse = &quot; + &quot;)
 }
-# Cycle/day from C1D1 / subsequent cycle starts (IP dispense dates)
+# Calendar days from most recent cycle IP start (not a fixed-length protocol visit day)
 cycle_day_label &lt;- function(dt, cycle_df) {
   if (is.na(dt) || nrow(cycle_df) == 0) return(NA_character_)
   eligible &lt;- cycle_df %&gt;% dplyr::filter(.data$cycle_start &lt;= dt)
@@ -1783,96 +1783,97 @@ tumor_waterfall_dat &lt;- tumor_change %&gt;%
   mutate(
     plot_y = best_pct_change,
     direction = if_else(best_pct_change &lt; 0, &quot;Shrinkage&quot;, &quot;Growth&quot;),
-    timing_lab = if_else(
-      best_is_first_scan,
-      paste0(
-        &quot;1st/best scan &quot;, dplyr::coalesce(scan_cd, &quot;NE&quot;),
-        &quot;\nCRP draw &quot;, dplyr::coalesce(crp_cd, &quot;NE&quot;)
-      ),
-      paste0(
-        &quot;1st scan &quot;, dplyr::coalesce(first_scan_cd, &quot;NE&quot;),
-        &quot;\nBest scan &quot;, dplyr::coalesce(scan_cd, &quot;NE&quot;),
-        &quot; · CRP &quot;, dplyr::coalesce(crp_cd, &quot;NE&quot;)
-      )
+    bar_lab = sprintf(&quot;%+.0f%%&quot;, best_pct_change),
+    crp_delta_lab = case_when(
+      is.na(crp_pct_change_at_imaging) ~ &quot;NE&quot;,
+      crp_pct_change_at_imaging &gt;= 0 ~
+        paste0(&quot;↓&quot;, sprintf(&quot;%.0f&quot;, crp_pct_change_at_imaging), &quot;%&quot;),
+      TRUE ~
+        paste0(&quot;↑&quot;, sprintf(&quot;%.0f&quot;, abs(crp_pct_change_at_imaging)), &quot;%&quot;)
     ),
-    crp_lab = if_else(
-      is.na(baseline_crp) | is.na(crp_at_imaging) | is.na(crp_pct_change_at_imaging),
-      paste0(&quot;CRP NE at scan\n&quot;, timing_lab),
-      paste0(
-        &quot;CRP &quot;, sprintf(&quot;%.1f&quot;, baseline_crp), &quot; → &quot;, sprintf(&quot;%.1f&quot;, crp_at_imaging),
-        &quot; (&quot;,
-        if_else(
-          crp_pct_change_at_imaging &gt;= 0,
-          paste0(&quot;↓&quot;, sprintf(&quot;%.0f&quot;, crp_pct_change_at_imaging), &quot;%&quot;),
-          paste0(&quot;↑&quot;, sprintf(&quot;%.0f&quot;, abs(crp_pct_change_at_imaging)), &quot;%&quot;)
-        ),
-        &quot;)&quot;,
-        &quot;\n&quot;, timing_lab
-      )
-    ),
-    io_lab = if_else(
+    prior_io_lab = if_else(
       is.na(io_regimen) | io_regimen == &quot;&quot;,
-      NA_character_,
-      paste0(
-        &quot;IO: &quot;, stringr::str_wrap(io_regimen, width = 20),
-        &quot;\n&quot;, sprintf(&quot;%.1f&quot;, months_since_last_io), &quot; mo before start&quot;
-      )
-    ),
-    axis_lab = if_else(
-      is.na(io_lab),
-      paste0(&quot;ID &quot;, study_id, &quot;\n&quot;, crp_lab),
-      paste0(&quot;ID &quot;, study_id, &quot;\n&quot;, crp_lab, &quot;\n&quot;, io_lab)
+      &quot;—&quot;,
+      paste0(io_regimen, &quot; (&quot;, sprintf(&quot;%.1f&quot;, months_since_last_io), &quot; mo)&quot;)
     )
   ) %&gt;%
   mutate(study_id = reorder(factor(study_id), best_pct_change))
 
-axis_lab_map &lt;- setNames(tumor_waterfall_dat$axis_lab, as.character(tumor_waterfall_dat$study_id))
-
-tumor_fig_caption &lt;- paste0(
-  &quot;Continued-dose patients only (original schedule — not the amended 2-week course).\n&quot;,
-  &quot;Each bar = best tumor-size change. Labels: CRP baseline → at best-scan CRP draw; 1st vs best scan timing (cycle/day); prior IO if any.&quot;
-)
-
 if (nrow(tumor_waterfall_dat) &gt; 0) {
-  ggplot(tumor_waterfall_dat, aes(x = study_id, y = plot_y, fill = direction)) +
-    geom_col(width = 0.65) +
+  p_tumor_waterfall &lt;- ggplot(
+    tumor_waterfall_dat,
+    aes(x = study_id, y = plot_y, fill = direction)
+  ) +
+    geom_col(width = 0.7) +
     geom_hline(yintercept = 0, linewidth = 0.5) +
-    scale_x_discrete(labels = axis_lab_map) +
+    geom_text(
+      aes(
+        label = bar_lab,
+        vjust = if_else(plot_y &gt;= 0, -0.35, 1.35)
+      ),
+      size = 5,
+      fontface = &quot;bold&quot;
+    ) +
     scale_fill_manual(
       values = c(&quot;Shrinkage&quot; = &quot;#2C6FAC&quot;, &quot;Growth&quot; = &quot;#C75B39&quot;),
       guide = &quot;none&quot;
     ) +
+    scale_y_continuous(expand = expansion(mult = c(0.12, 0.14))) +
     labs(
       title = &quot;Best % change in target-lesion SOD (n = 5)&quot;,
       subtitle = &quot;Original continued colchicine schedule (not amended 2-week dosing)&quot;,
-      x = NULL,
+      x = &quot;Study ID&quot;,
       y = &quot;Best % change from baseline&quot;,
-      caption = tumor_fig_caption
+      caption = &quot;Annotation details (scan timing, CRP, prior IO) are in the table below.&quot;
     ) +
     theme_minimal(base_size = 18) +
     theme(
       panel.grid.major.x = element_blank(),
       plot.title = element_text(size = 20, face = &quot;bold&quot;, hjust = 0),
-      plot.subtitle = element_text(size = 15, face = &quot;bold&quot;, color = &quot;#1F4E79&quot;, hjust = 0),
+      plot.subtitle = element_text(size = 14, face = &quot;bold&quot;, color = &quot;#1F4E79&quot;, hjust = 0),
       plot.caption.position = &quot;plot&quot;,
-      plot.caption = element_text(
-        size = 13,
-        hjust = 0,
-        lineheight = 1.2,
-        margin = margin(t = 14),
-        color = &quot;#333333&quot;
-      ),
-      axis.title.y = element_text(size = 17, face = &quot;bold&quot;),
-      axis.text.y = element_text(size = 16),
-      axis.text.x = element_text(size = 13, lineheight = 1.08, vjust = 1),
-      plot.margin = margin(10, 14, 18, 10)
-    ) +
-    # Force caption to wrap across nearly full figure width
-    ggplot2::coord_cartesian(clip = &quot;off&quot;)
+      plot.caption = element_text(size = 12, hjust = 0, color = &quot;#333333&quot;, margin = margin(t = 10)),
+      axis.title = element_text(size = 16, face = &quot;bold&quot;),
+      axis.text = element_text(size = 15),
+      plot.margin = margin(10, 14, 12, 10)
+    )
+  print(p_tumor_waterfall)
 } else {
+  p_tumor_waterfall &lt;- NULL
   plot.new()
   text(0.5, 0.5, &quot;No evaluable tumor-change data&quot;)
 }
+
+# =============================================================================
+# R chunk: tumor-waterfall-table  ()
+# =============================================================================
+tumor_annot_tbl &lt;- tumor_waterfall_dat %&gt;%
+  arrange(best_pct_change) %&gt;%
+  transmute(
+    `Study ID` = as.character(study_id),
+    `Best SOD %` = sprintf(&quot;%+.1f&quot;, best_pct_change),
+    `First scan` = dplyr::coalesce(first_scan_cd, &quot;NE&quot;),
+    `Best scan` = dplyr::coalesce(scan_cd, &quot;NE&quot;),
+    `CRP baseline` = if_else(is.na(baseline_crp), &quot;NE&quot;, sprintf(&quot;%.1f&quot;, baseline_crp)),
+    `CRP at best-scan draw` = if_else(is.na(crp_at_imaging), &quot;NE&quot;, sprintf(&quot;%.1f&quot;, crp_at_imaging)),
+    `ΔCRP %` = crp_delta_lab,
+    `CRP draw timing` = dplyr::coalesce(crp_cd, &quot;NE&quot;),
+    `Prior IO (mo before start)` = prior_io_lab
+  )
+
+tumor_annot_tbl %&gt;%
+  kbl(caption = tbl_cap(paste0(
+    &quot;Annotation for Figure 2 (waterfall). All patients on original continued-dose schedule. &quot;,
+    &quot;C#D# = calendar days from that cycle’s IP start (may extend past the 14-day dosing block into follow-up). &quot;,
+    &quot;CRP at best-scan draw = CRP nearest the best SOD imaging date (±21 days). &quot;,
+    &quot;Prior IO: concurrent agents joined with “+”; sequential lines show latest agent only. &quot;,
+    &quot;Abbreviations: SOD, sum of diameters; CRP, C-reactive protein (mg/L); IO, immunotherapy; NE, not evaluable.&quot;
+  ))) %&gt;%
+  ctr_table_style() %&gt;%
+  kableExtra::footnote(
+    general = &quot;Rows ordered left-to-right as in the waterfall (best to worst SOD change).&quot;,
+    general_title = &quot;&quot;
+  )
 
 # =============================================================================
 # R chunk: crp-longitudinal-plot  (, fig.width = 9, fig.height = 11, fig.cap = fig_cap(&quot;Longitudinal peripheral blood CRP (mg/L) across protocol C1 visits (baseline C1D1 and post-baseline C1D8/C1D15) for enrolled patients with serial C1 values. Abbreviations: CRP, C-reactive protein.&quot;))
