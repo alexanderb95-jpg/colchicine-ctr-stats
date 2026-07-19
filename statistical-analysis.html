@@ -1569,13 +1569,17 @@ tumor_waterfall_dat &lt;- tumor_change %&gt;%
     ),
     io_lab = if_else(
       is.na(io_regimen) | io_regimen == &quot;&quot;,
-      &quot;No prior IO&quot;,
+      NA_character_,
       paste0(
         &quot;IO: &quot;, stringr::str_wrap(io_regimen, width = 18),
         &quot;\nLast IO dose: &quot;, sprintf(&quot;%.1f&quot;, months_since_last_io), &quot; mo before start&quot;
       )
     ),
-    axis_lab = paste0(&quot;ID &quot;, study_id, &quot;\n&quot;, crp_lab, &quot;\n&quot;, io_lab)
+    axis_lab = if_else(
+      is.na(io_lab),
+      paste0(&quot;ID &quot;, study_id, &quot;\n&quot;, crp_lab),
+      paste0(&quot;ID &quot;, study_id, &quot;\n&quot;, crp_lab, &quot;\n&quot;, io_lab)
+    )
   ) %&gt;%
   mutate(study_id = reorder(factor(study_id), best_pct_change))
 
