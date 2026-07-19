@@ -1499,29 +1499,35 @@ if (nrow(crp_endpoint) &gt; 0) {
 }
 
 # =============================================================================
-# R chunk: tumor-waterfall-plot  (, fig.width = 10, fig.height = 7.2, fig.cap=fig_cap(&quot;Best percent change in target-lesion sum of diameters (SOD) from baseline among enrolled patients with ≥2 on-study scan sets (n = 5). Axis labels under each Study ID show maximum on-treatment CRP decline (primary endpoint definition; CRP NE if no cycle 1 post-baseline CRP) and the full prior systemic regimen (agents in chronological order). Negative SOD values indicate tumor shrinkage. Abbreviations: SOD, sum of diameters; NE, not evaluable; PLD, pegylated liposomal doxorubicin.&quot;))
+# R chunk: tumor-waterfall-plot  (, fig.width = 11, fig.height = 8, fig.cap=fig_cap(&quot;Best percent change in target-lesion sum of diameters (SOD) from baseline among enrolled patients with ≥2 on-study scan sets (n = 5). Axis labels under each Study ID show maximum on-treatment CRP decline (primary endpoint definition; CRP NE if no cycle 1 post-baseline CRP) and prior immunotherapy (if received), including months from last immunotherapy dose to colchicine start. Negative SOD values indicate tumor shrinkage. Abbreviations: SOD, sum of diameters; NE, not evaluable; IO, immunotherapy.&quot;))
 # =============================================================================
-# Full prior systemic regimen (all coded systemic agents, chronological by start date)
-systemic_rx_pat &lt;- paste0(
-  &quot;(carboplatin|cisplatin|oxaliplatin|taxol|paclitaxel|docetaxel|gemcitabine|&quot;,
-  &quot;topotecan|doxil|doxorubicin|etoposide|bevacizumab|pembrolizumab|nivolumab|&quot;,
-  &quot;ipilimumab|atezolizumab|enfortumab|olaparib|rucaparib|niraparib|xeloda|&quot;,
-  &quot;capecitabine|irinotecan|panitumumab|fluorouracil|5-fu)&quot;
-)
-normalize_drug &lt;- function(x) {
+# Prior immunotherapy regimen + months since last IO dose (to colchicine start)
+io_rx_pat &lt;- &quot;(pembrolizumab|nivolumab|ipilimumab|atezolizumab|durvalumab|avelumab|cemiplimab)&quot;
+normalize_io &lt;- function(x) {
   dplyr::recode(
     tolower(x),
-    taxol = &quot;paclitaxel&quot;,
-    doxil = &quot;PLD&quot;,
-    xeloda = &quot;capecitabine&quot;,
-    &quot;5-fu&quot; = &quot;5-FU&quot;,
-    fluorouracil = &quot;5-FU&quot;,
+    pembrolizumab = &quot;pembrolizumab&quot;,
+    nivolumab = &quot;nivolumab&quot;,
+    ipilimumab = &quot;ipilimumab&quot;,
+    atezolizumab = &quot;atezolizumab&quot;,
     .default = tolower(x)
   )
 }
-prior_full_regimen &lt;- dat %&gt;%
+tx_index &lt;- dat %&gt;%
+  filter(study_id %in% as.character(tumor_change$study_id)) %&gt;%
+  group_by(study_id = as.character(study_id)) %&gt;%
+  summarise(
+    index_date = dplyr::coalesce(
+      suppressWarnings(min(.data$date_ip_dispensed, na.rm = TRUE)),
+      suppressWarnings(min(.data$date_of_enrollment, na.rm = TRUE))
+    ),
+    .groups = &quot;drop&quot;
+  ) %&gt;%
+  mutate(index_date = if_else(is.infinite(.data$index_date), as.Date(NA), .data$index_date))
+
+prior_io &lt;- dat %&gt;%
   filter(
-    study_id %in% enrolled_ids,
+    study_id %in% as.character(tumor_change$study_id),
     redcap_repeat_instrument == &quot;prior_treatment_therapy&quot;,
     !is.na(prior_treatment_therapies),
     prior_treatment_therapies != &quot;&quot;
@@ -1529,15 +1535,21 @@ prior_full_regimen &lt;- dat %&gt;%
   mutate(
     study_id = as.character(study_id),
     therapy_l = tolower(coalesce(prior_treatment_therapies, &quot;&quot;)),
-    drug = stringr::str_extract(.data$therapy_l, systemic_rx_pat),
-    start_dt = .data$therapy_start_date
+    drug = stringr::str_extract(.data$therapy_l, io_rx_pat),
+    start_dt = .data$therapy_start_date,
+    end_dt = dplyr::coalesce(.data$therapy_end_date, .data$therapy_start_date)
   ) %&gt;%
   filter(!is.na(.data$drug)) %&gt;%
   arrange(study_id, .data$start_dt, .data$drug) %&gt;%
   group_by(study_id) %&gt;%
   summarise(
-    prior_full = paste(unique(normalize_drug(.data$drug)), collapse = &quot; → &quot;),
+    io_regimen = paste(unique(normalize_io(.data$drug)), collapse = &quot; → &quot;),
+    last_io_dose = max(.data$end_dt, na.rm = TRUE),
     .groups = &quot;drop&quot;
+  ) %&gt;%
+  left_join(tx_index, by = &quot;study_id&quot;) %&gt;%
+  mutate(
+    months_since_last_io = as.numeric(.data$index_date - .data$last_io_dose) / 30.44
   )
 
 tumor_waterfall_dat &lt;- tumor_change %&gt;%
@@ -1546,7 +1558,7 @@ tumor_waterfall_dat &lt;- tumor_change %&gt;%
     crp_endpoint %&gt;% transmute(study_id = as.character(study_id), max_pct_decline),
     by = &quot;study_id&quot;
   ) %&gt;%
-  left_join(prior_full_regimen, by = &quot;study_id&quot;) %&gt;%
+  left_join(prior_io, by = &quot;study_id&quot;) %&gt;%
   mutate(
     plot_y = best_pct_change,
     direction = if_else(best_pct_change &lt; 0, &quot;Shrinkage&quot;, &quot;Growth&quot;),
@@ -1555,12 +1567,15 @@ tumor_waterfall_dat &lt;- tumor_change %&gt;%
       &quot;CRP NE&quot;,
       paste0(&quot;CRP ↓&quot;, sprintf(&quot;%.0f&quot;, max_pct_decline), &quot;%&quot;)
     ),
-    prior_lab = if_else(
-      is.na(prior_full) | prior_full == &quot;&quot;,
-      &quot;prior: none coded&quot;,
-      paste0(&quot;prior:\n&quot;, stringr::str_wrap(prior_full, width = 22))
+    io_lab = if_else(
+      is.na(io_regimen) | io_regimen == &quot;&quot;,
+      &quot;No prior IO&quot;,
+      paste0(
+        &quot;IO: &quot;, stringr::str_wrap(io_regimen, width = 18),
+        &quot;\nLast IO dose: &quot;, sprintf(&quot;%.1f&quot;, months_since_last_io), &quot; mo before start&quot;
+      )
     ),
-    axis_lab = paste0(&quot;ID &quot;, study_id, &quot;\n&quot;, crp_lab, &quot;\n&quot;, prior_lab)
+    axis_lab = paste0(&quot;ID &quot;, study_id, &quot;\n&quot;, crp_lab, &quot;\n&quot;, io_lab)
   ) %&gt;%
   mutate(study_id = reorder(factor(study_id), best_pct_change))
 
@@ -1568,8 +1583,8 @@ axis_lab_map &lt;- setNames(tumor_waterfall_dat$axis_lab, as.character(tumor_wat
 
 if (nrow(tumor_waterfall_dat) &gt; 0) {
   ggplot(tumor_waterfall_dat, aes(x = study_id, y = plot_y, fill = direction)) +
-    geom_col(width = 0.7) +
-    geom_hline(yintercept = 0, linewidth = 0.4) +
+    geom_col(width = 0.65) +
+    geom_hline(yintercept = 0, linewidth = 0.5) +
     scale_x_discrete(labels = axis_lab_map) +
     scale_fill_manual(
       values = c(&quot;Shrinkage&quot; = &quot;#2C6FAC&quot;, &quot;Growth&quot; = &quot;#C75B39&quot;),
@@ -1579,11 +1594,13 @@ if (nrow(tumor_waterfall_dat) &gt; 0) {
       x = NULL,
       y = &quot;Best % change in target-lesion SOD&quot;
     ) +
-    theme_minimal(base_size = 12) +
+    theme_minimal(base_size = 18) +
     theme(
       panel.grid.major.x = element_blank(),
-      axis.text.x = element_text(size = 7.5, lineheight = 0.95, vjust = 1),
-      plot.margin = margin(5.5, 5.5, 20, 5.5)
+      axis.title.y = element_text(size = 18, face = &quot;bold&quot;),
+      axis.text.y = element_text(size = 16),
+      axis.text.x = element_text(size = 13, lineheight = 1.05, vjust = 1),
+      plot.margin = margin(8, 8, 24, 8)
     )
 } else {
   plot.new()

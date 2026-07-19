@@ -1463,29 +1463,35 @@ if (nrow(crp_endpoint) > 0) {
 }
 
 # =============================================================================
-# R chunk: tumor-waterfall-plot  (, fig.width = 10, fig.height = 7.2, fig.cap=fig_cap("Best percent change in target-lesion sum of diameters (SOD) from baseline among enrolled patients with ≥2 on-study scan sets (n = 5). Axis labels under each Study ID show maximum on-treatment CRP decline (primary endpoint definition; CRP NE if no cycle 1 post-baseline CRP) and the full prior systemic regimen (agents in chronological order). Negative SOD values indicate tumor shrinkage. Abbreviations: SOD, sum of diameters; NE, not evaluable; PLD, pegylated liposomal doxorubicin."))
+# R chunk: tumor-waterfall-plot  (, fig.width = 11, fig.height = 8, fig.cap=fig_cap("Best percent change in target-lesion sum of diameters (SOD) from baseline among enrolled patients with ≥2 on-study scan sets (n = 5). Axis labels under each Study ID show maximum on-treatment CRP decline (primary endpoint definition; CRP NE if no cycle 1 post-baseline CRP) and prior immunotherapy (if received), including months from last immunotherapy dose to colchicine start. Negative SOD values indicate tumor shrinkage. Abbreviations: SOD, sum of diameters; NE, not evaluable; IO, immunotherapy."))
 # =============================================================================
-# Full prior systemic regimen (all coded systemic agents, chronological by start date)
-systemic_rx_pat <- paste0(
-  "(carboplatin|cisplatin|oxaliplatin|taxol|paclitaxel|docetaxel|gemcitabine|",
-  "topotecan|doxil|doxorubicin|etoposide|bevacizumab|pembrolizumab|nivolumab|",
-  "ipilimumab|atezolizumab|enfortumab|olaparib|rucaparib|niraparib|xeloda|",
-  "capecitabine|irinotecan|panitumumab|fluorouracil|5-fu)"
-)
-normalize_drug <- function(x) {
+# Prior immunotherapy regimen + months since last IO dose (to colchicine start)
+io_rx_pat <- "(pembrolizumab|nivolumab|ipilimumab|atezolizumab|durvalumab|avelumab|cemiplimab)"
+normalize_io <- function(x) {
   dplyr::recode(
     tolower(x),
-    taxol = "paclitaxel",
-    doxil = "PLD",
-    xeloda = "capecitabine",
-    "5-fu" = "5-FU",
-    fluorouracil = "5-FU",
+    pembrolizumab = "pembrolizumab",
+    nivolumab = "nivolumab",
+    ipilimumab = "ipilimumab",
+    atezolizumab = "atezolizumab",
     .default = tolower(x)
   )
 }
-prior_full_regimen <- dat %>%
+tx_index <- dat %>%
+  filter(study_id %in% as.character(tumor_change$study_id)) %>%
+  group_by(study_id = as.character(study_id)) %>%
+  summarise(
+    index_date = dplyr::coalesce(
+      suppressWarnings(min(.data$date_ip_dispensed, na.rm = TRUE)),
+      suppressWarnings(min(.data$date_of_enrollment, na.rm = TRUE))
+    ),
+    .groups = "drop"
+  ) %>%
+  mutate(index_date = if_else(is.infinite(.data$index_date), as.Date(NA), .data$index_date))
+
+prior_io <- dat %>%
   filter(
-    study_id %in% enrolled_ids,
+    study_id %in% as.character(tumor_change$study_id),
     redcap_repeat_instrument == "prior_treatment_therapy",
     !is.na(prior_treatment_therapies),
     prior_treatment_therapies != ""
@@ -1493,15 +1499,21 @@ prior_full_regimen <- dat %>%
   mutate(
     study_id = as.character(study_id),
     therapy_l = tolower(coalesce(prior_treatment_therapies, "")),
-    drug = stringr::str_extract(.data$therapy_l, systemic_rx_pat),
-    start_dt = .data$therapy_start_date
+    drug = stringr::str_extract(.data$therapy_l, io_rx_pat),
+    start_dt = .data$therapy_start_date,
+    end_dt = dplyr::coalesce(.data$therapy_end_date, .data$therapy_start_date)
   ) %>%
   filter(!is.na(.data$drug)) %>%
   arrange(study_id, .data$start_dt, .data$drug) %>%
   group_by(study_id) %>%
   summarise(
-    prior_full = paste(unique(normalize_drug(.data$drug)), collapse = " → "),
+    io_regimen = paste(unique(normalize_io(.data$drug)), collapse = " → "),
+    last_io_dose = max(.data$end_dt, na.rm = TRUE),
     .groups = "drop"
+  ) %>%
+  left_join(tx_index, by = "study_id") %>%
+  mutate(
+    months_since_last_io = as.numeric(.data$index_date - .data$last_io_dose) / 30.44
   )
 
 tumor_waterfall_dat <- tumor_change %>%
@@ -1510,7 +1522,7 @@ tumor_waterfall_dat <- tumor_change %>%
     crp_endpoint %>% transmute(study_id = as.character(study_id), max_pct_decline),
     by = "study_id"
   ) %>%
-  left_join(prior_full_regimen, by = "study_id") %>%
+  left_join(prior_io, by = "study_id") %>%
   mutate(
     plot_y = best_pct_change,
     direction = if_else(best_pct_change < 0, "Shrinkage", "Growth"),
@@ -1519,12 +1531,15 @@ tumor_waterfall_dat <- tumor_change %>%
       "CRP NE",
       paste0("CRP ↓", sprintf("%.0f", max_pct_decline), "%")
     ),
-    prior_lab = if_else(
-      is.na(prior_full) | prior_full == "",
-      "prior: none coded",
-      paste0("prior:\n", stringr::str_wrap(prior_full, width = 22))
+    io_lab = if_else(
+      is.na(io_regimen) | io_regimen == "",
+      "No prior IO",
+      paste0(
+        "IO: ", stringr::str_wrap(io_regimen, width = 18),
+        "\nLast IO dose: ", sprintf("%.1f", months_since_last_io), " mo before start"
+      )
     ),
-    axis_lab = paste0("ID ", study_id, "\n", crp_lab, "\n", prior_lab)
+    axis_lab = paste0("ID ", study_id, "\n", crp_lab, "\n", io_lab)
   ) %>%
   mutate(study_id = reorder(factor(study_id), best_pct_change))
 
@@ -1532,8 +1547,8 @@ axis_lab_map <- setNames(tumor_waterfall_dat$axis_lab, as.character(tumor_waterf
 
 if (nrow(tumor_waterfall_dat) > 0) {
   ggplot(tumor_waterfall_dat, aes(x = study_id, y = plot_y, fill = direction)) +
-    geom_col(width = 0.7) +
-    geom_hline(yintercept = 0, linewidth = 0.4) +
+    geom_col(width = 0.65) +
+    geom_hline(yintercept = 0, linewidth = 0.5) +
     scale_x_discrete(labels = axis_lab_map) +
     scale_fill_manual(
       values = c("Shrinkage" = "#2C6FAC", "Growth" = "#C75B39"),
@@ -1543,11 +1558,13 @@ if (nrow(tumor_waterfall_dat) > 0) {
       x = NULL,
       y = "Best % change in target-lesion SOD"
     ) +
-    theme_minimal(base_size = 12) +
+    theme_minimal(base_size = 18) +
     theme(
       panel.grid.major.x = element_blank(),
-      axis.text.x = element_text(size = 7.5, lineheight = 0.95, vjust = 1),
-      plot.margin = margin(5.5, 5.5, 20, 5.5)
+      axis.title.y = element_text(size = 18, face = "bold"),
+      axis.text.y = element_text(size = 16),
+      axis.text.x = element_text(size = 13, lineheight = 1.05, vjust = 1),
+      plot.margin = margin(8, 8, 24, 8)
     )
 } else {
   plot.new()
