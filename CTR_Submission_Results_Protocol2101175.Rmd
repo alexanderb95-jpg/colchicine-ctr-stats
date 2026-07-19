@@ -1002,7 +1002,7 @@ if (nrow(crp_endpoint) > 0) {
 }
 ```
 
-```{r tumor-waterfall-plot, fig.width = 12, fig.height = 11, fig.cap=fig_cap("Best percent change in target-lesion sum of diameters (SOD) among patients with ≥2 on-study scans (n = 5). All were on the original continued-colchicine schedule (not the amended 2-week course). Labels show CRP at baseline and at the best-response scan (with cycle/day) and prior immunotherapy when applicable. Abbreviations: SOD, sum of diameters; CRP, C-reactive protein; IO, immunotherapy.")}
+```{r tumor-waterfall-plot, fig.width = 12, fig.height = 11.5, fig.cap=fig_cap("Best percent change in target-lesion sum of diameters (SOD) among patients with ≥2 on-study scans (n = 5). All were on the original continued-colchicine schedule (not the amended 2-week course). Labels show CRP at baseline versus at the best-response scan, first versus best scan timing (cycle/day), and prior immunotherapy when applicable. Abbreviations: SOD, sum of diameters; CRP, C-reactive protein; IO, immunotherapy.")}
 # Prior IO: concurrent agents joined with "+"; sequential lines show latest only
 io_rx_pat <- "(pembrolizumab|nivolumab|ipilimumab|atezolizumab|durvalumab|avelumab|cemiplimab)"
 io_display_order <- c(
@@ -1121,8 +1121,29 @@ prior_io <- dat %>%
 
 scan_cd_map <- tumor_change %>%
   mutate(study_id = as.character(study_id)) %>%
+  left_join(
+    dat %>%
+      filter(study_id %in% as.integer(tumor_change$study_id)) %>%
+      transmute(
+        study_id = as.character(study_id),
+        assess_date = dplyr::coalesce(
+          .data$date_of_target_lesions_eva,
+          .data$date_of_overall_response
+        )
+      ) %>%
+      filter(!is.na(.data$assess_date)) %>%
+      distinct() %>%
+      arrange(.data$study_id, .data$assess_date) %>%
+      group_by(.data$study_id) %>%
+      summarise(first_scan_date = dplyr::first(.data$assess_date), .groups = "drop"),
+    by = "study_id"
+  ) %>%
   rowwise() %>%
   mutate(
+    first_scan_cd = cycle_day_label(
+      first_scan_date,
+      cycle_starts %>% filter(study_id == .env$study_id)
+    ),
     scan_cd = cycle_day_label(
       imaging_date,
       cycle_starts %>% filter(study_id == .env$study_id)
@@ -1130,10 +1151,13 @@ scan_cd_map <- tumor_change %>%
     crp_cd = cycle_day_label(
       crp_date_at_imaging,
       cycle_starts %>% filter(study_id == .env$study_id)
-    )
+    ),
+    best_is_first_scan = !is.na(first_scan_date) &
+      !is.na(imaging_date) &
+      first_scan_date == imaging_date
   ) %>%
   ungroup() %>%
-  select(study_id, scan_cd, crp_cd)
+  select(study_id, first_scan_cd, scan_cd, crp_cd, best_is_first_scan)
 
 tumor_waterfall_dat <- tumor_change %>%
   mutate(study_id = as.character(study_id)) %>%
@@ -1142,9 +1166,21 @@ tumor_waterfall_dat <- tumor_change %>%
   mutate(
     plot_y = best_pct_change,
     direction = if_else(best_pct_change < 0, "Shrinkage", "Growth"),
+    timing_lab = if_else(
+      best_is_first_scan,
+      paste0(
+        "1st/best scan ", dplyr::coalesce(scan_cd, "NE"),
+        "\nCRP draw ", dplyr::coalesce(crp_cd, "NE")
+      ),
+      paste0(
+        "1st scan ", dplyr::coalesce(first_scan_cd, "NE"),
+        "\nBest scan ", dplyr::coalesce(scan_cd, "NE"),
+        " · CRP ", dplyr::coalesce(crp_cd, "NE")
+      )
+    ),
     crp_lab = if_else(
       is.na(baseline_crp) | is.na(crp_at_imaging) | is.na(crp_pct_change_at_imaging),
-      "CRP NE at scan",
+      paste0("CRP NE at scan\n", timing_lab),
       paste0(
         "CRP ", sprintf("%.1f", baseline_crp), " → ", sprintf("%.1f", crp_at_imaging),
         " (",
@@ -1154,8 +1190,7 @@ tumor_waterfall_dat <- tumor_change %>%
           paste0("↑", sprintf("%.0f", abs(crp_pct_change_at_imaging)), "%")
         ),
         ")",
-        "\nScan ", dplyr::coalesce(scan_cd, "NE"),
-        " · CRP ", dplyr::coalesce(crp_cd, "NE")
+        "\n", timing_lab
       )
     ),
     io_lab = if_else(
@@ -1178,7 +1213,7 @@ axis_lab_map <- setNames(tumor_waterfall_dat$axis_lab, as.character(tumor_waterf
 
 tumor_fig_caption <- paste0(
   "Continued-dose patients only (original schedule — not the amended 2-week course).\n",
-  "Each bar = best tumor-size change. Labels: CRP baseline → at that scan (% change), with scan/CRP cycle-day; prior IO if any."
+  "Each bar = best tumor-size change. Labels: CRP baseline → at best-scan CRP draw; 1st vs best scan timing (cycle/day); prior IO if any."
 )
 
 if (nrow(tumor_waterfall_dat) > 0) {
