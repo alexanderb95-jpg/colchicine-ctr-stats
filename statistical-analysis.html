@@ -1618,7 +1618,7 @@ if (nrow(crp_endpoint) &gt; 0) {
 }
 
 # =============================================================================
-# R chunk: tumor-waterfall-plot  (, fig.width = 13, fig.height = 6.2, fig.cap=fig_cap(&quot;Best percent change in target-lesion sum of diameters (SOD) on continued colchicine (n = 5; original schedule). Left: waterfall. Right: scan timing, CRP at best-scan draw, and prior IO. Only ID 4* had tumor shrinkage (prior dual IO with rising CRP at that scan; exploratory). Abbreviations: SOD, sum of diameters; CRP, C-reactive protein; IO, immunotherapy.&quot;))
+# R chunk: tumor-waterfall-plot  (, fig.width = 13, fig.height = 6.4, fig.cap=fig_cap(&quot;Best percent change in target-lesion sum of diameters during continued colchicine treatment. The waterfall plot shows the best percent change from baseline among five patients treated on the original schedule; the accompanying table summarizes scan timing, CRP change near the best-response scan, and prior immunotherapy exposure. One patient, ID 4, experienced tumor shrinkage of 19% after prior ipilimumab plus nivolumab, although CRP increased near the time of the scan. This post hoc analysis is hypothesis-generating only. Abbreviations: CRP, C-reactive protein; IO, immunotherapy; SOD, sum of diameters.&quot;))
 # =============================================================================
 suppressPackageStartupMessages({
   if (!requireNamespace(&quot;patchwork&quot;, quietly = TRUE)) stop(&quot;Install patchwork&quot;)
@@ -1835,16 +1835,14 @@ if (nrow(tumor_waterfall_dat) &gt; 0) {
     ) +
     scale_y_continuous(expand = expansion(mult = c(0.14, 0.16))) +
     labs(
-      title = &quot;Best tumor change on continued colchicine (n = 5)&quot;,
-      subtitle = &quot;Only shrinkage: ID 4* - prior dual IO (ipi + nivo) with CRP up at that scan (exploratory)&quot;,
+      title = &quot;Best tumor change during continued colchicine treatment (n = 5)&quot;,
       x = &quot;Study ID&quot;,
       y = &quot;Best % SOD change&quot;
     ) +
     theme_minimal(base_size = 15) +
     theme(
       panel.grid.major.x = element_blank(),
-      plot.title = element_text(size = 16, face = &quot;bold&quot;, hjust = 0),
-      plot.subtitle = element_text(size = 11, face = &quot;bold&quot;, color = &quot;#1F4E79&quot;, hjust = 0),
+      plot.title = element_text(size = 15, face = &quot;bold&quot;, hjust = 0),
       axis.title = element_text(size = 13, face = &quot;bold&quot;),
       axis.text = element_text(size = 13),
       plot.margin = margin(6, 8, 6, 6)
@@ -1854,10 +1852,10 @@ if (nrow(tumor_waterfall_dat) &gt; 0) {
     arrange(best_pct_change) %&gt;%
     transmute(
       ID = if_else(highlight, paste0(as.character(study_id), &quot;*&quot;), as.character(study_id)),
-      Tumor = sprintf(&quot;%+.0f%%&quot;, best_pct_change),
+      `Best SOD change` = sprintf(&quot;%+.0f%%&quot;, best_pct_change),
       `1st scan` = dplyr::coalesce(first_scan_cd, &quot;NE&quot;),
       `Best scan` = dplyr::coalesce(scan_cd, &quot;NE&quot;),
-      CRP = crp_change_lab,
+      `CRP near best scan` = crp_change_lab,
       `Prior IO` = prior_io_lab
     )
 
@@ -1880,10 +1878,10 @@ if (nrow(tumor_waterfall_dat) &gt; 0) {
 
   fig_caption_grob &lt;- grid::textGrob(
     paste0(
-      &quot;*Hypothesis-generating only (n = 5). Primary CRP endpoint was not met overall. &quot;,
-      &quot;Blue = shrinkage; orange = growth.\n&quot;,
-      &quot;Scan times = calendar days from that cycle IP start (C#D#). &quot;,
-      &quot;CRP = baseline -&gt; nearest draw to best scan (+/-21 d).&quot;
+      &quot;Exploratory analysis of patients treated on the original schedule. &quot;,
+      &quot;Blue indicates tumor shrinkage; orange indicates tumor growth. &quot;,
+      &quot;CRP reflects the measurement nearest the best-response scan within +/-21 days.\n&quot;,
+      &quot;*ID 4: prior ipilimumab + nivolumab. C#D# = calendar days from that cycle IP start.&quot;
     ),
     x = 0, hjust = 0, gp = grid::gpar(fontsize = 9.5, col = &quot;#444444&quot;, lineheight = 1.2)
   )
