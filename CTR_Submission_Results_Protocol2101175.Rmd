@@ -1264,11 +1264,11 @@ if (nrow(tumor_waterfall_dat) > 0) {
   fig_caption_grob <- grid::textGrob(
     paste0(
       "*Hypothesis-generating only (n = 5). Primary CRP endpoint was not met overall. ",
-      "Blue = shrinkage; orange = growth. ",
+      "Blue = shrinkage; orange = growth.\n",
       "Scan times = calendar days from that cycle IP start (C#D#). ",
       "CRP = baseline -> nearest draw to best scan (+/-21 d)."
     ),
-    x = 0, hjust = 0, gp = grid::gpar(fontsize = 9.5, col = "#444444", lineheight = 1.15)
+    x = 0, hjust = 0, gp = grid::gpar(fontsize = 9.5, col = "#444444", lineheight = 1.2)
   )
 
   # Joint figure: plot left, table right, caption below (before end of figure)
