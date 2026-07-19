@@ -1582,8 +1582,13 @@ if (nrow(crp_endpoint) > 0) {
 }
 
 # =============================================================================
-# R chunk: tumor-waterfall-plot  (, fig.width = 10, fig.height = 5.8, fig.cap=fig_cap("Best percent change in target-lesion sum of diameters (SOD) on continued colchicine (n = 5; original schedule, not amended 2-week dosing). Only ID 4 had tumor shrinkage; that patient had prior dual checkpoint blockade (ipilimumab + nivolumab) and rising CRP at the best-scan timepoint (exploratory observation). Companion table below. Abbreviations: SOD, sum of diameters; CRP, C-reactive protein; IO, immunotherapy."))
+# R chunk: tumor-waterfall-plot  (, fig.width = 13, fig.height = 6.2, fig.cap=fig_cap("Best percent change in target-lesion sum of diameters (SOD) on continued colchicine (n = 5; original schedule). Left: waterfall. Right: scan timing, CRP at best-scan draw, and prior IO. Only ID 4* had tumor shrinkage (prior dual IO with rising CRP at that scan; exploratory). Abbreviations: SOD, sum of diameters; CRP, C-reactive protein; IO, immunotherapy."))
 # =============================================================================
+suppressPackageStartupMessages({
+  if (!requireNamespace("patchwork", quietly = TRUE)) stop("Install patchwork")
+  if (!requireNamespace("gridExtra", quietly = TRUE)) stop("Install gridExtra")
+  if (!requireNamespace("gtable", quietly = TRUE)) stop("Install gtable")
+})
 # Prior IO: concurrent agents joined with "+"; sequential lines show latest only
 io_rx_pat <- "(pembrolizumab|nivolumab|ipilimumab|atezolizumab|durvalumab|avelumab|cemiplimab)"
 io_display_order <- c(
@@ -1781,7 +1786,7 @@ if (nrow(tumor_waterfall_dat) > 0) {
         label = bar_lab,
         vjust = if_else(plot_y >= 0, -0.4, 1.4)
       ),
-      size = 5.2,
+      size = 4.8,
       fontface = "bold"
     ) +
     scale_x_discrete(labels = setNames(
@@ -1797,57 +1802,72 @@ if (nrow(tumor_waterfall_dat) > 0) {
       title = "Best tumor change on continued colchicine (n = 5)",
       subtitle = "Only shrinkage: ID 4* - prior dual IO (ipi + nivo) with CRP up at that scan (exploratory)",
       x = "Study ID",
-      y = "Best % SOD change",
-      caption = paste0(
-        "*Hypothesis-generating only (n = 5). Primary CRP endpoint was not met overall.\n",
-        "Blue = shrinkage; orange = growth. Details in table."
-      )
+      y = "Best % SOD change"
     ) +
-    theme_minimal(base_size = 18) +
+    theme_minimal(base_size = 15) +
     theme(
       panel.grid.major.x = element_blank(),
-      plot.title = element_text(size = 20, face = "bold", hjust = 0),
-      plot.subtitle = element_text(size = 13, face = "bold", color = "#1F4E79", hjust = 0),
-      plot.caption.position = "plot",
-      plot.caption = element_text(
-        size = 11, hjust = 0, color = "#444444", lineheight = 1.15, margin = margin(t = 8)
-      ),
-      axis.title = element_text(size = 15, face = "bold"),
-      axis.text = element_text(size = 15),
-      plot.margin = margin(10, 14, 10, 10)
+      plot.title = element_text(size = 16, face = "bold", hjust = 0),
+      plot.subtitle = element_text(size = 11, face = "bold", color = "#1F4E79", hjust = 0),
+      axis.title = element_text(size = 13, face = "bold"),
+      axis.text = element_text(size = 13),
+      plot.margin = margin(6, 8, 6, 6)
     )
-  print(p_tumor_waterfall)
+
+  tumor_annot_tbl <- tumor_waterfall_dat %>%
+    arrange(best_pct_change) %>%
+    transmute(
+      ID = if_else(highlight, paste0(as.character(study_id), "*"), as.character(study_id)),
+      Tumor = sprintf("%+.0f%%", best_pct_change),
+      `1st scan` = dplyr::coalesce(first_scan_cd, "NE"),
+      `Best scan` = dplyr::coalesce(scan_cd, "NE"),
+      CRP = crp_change_lab,
+      `Prior IO` = prior_io_lab
+    )
+
+  tbl_theme <- gridExtra::ttheme_minimal(
+    base_size = 9,
+    padding = grid::unit(c(3.5, 3.5), "mm"),
+    core = list(fg_params = list(hjust = 0, x = 0.02)),
+    colhead = list(
+      fg_params = list(fontface = 2, hjust = 0, x = 0.02),
+      bg_params = list(fill = "#D9E2F3")
+    )
+  )
+  tg <- gridExtra::tableGrob(tumor_annot_tbl, rows = NULL, theme = tbl_theme)
+  # Highlight ID 4* row (first data row after header)
+  tg <- gtable::gtable_add_grob(
+    tg,
+    grid::rectGrob(gp = grid::gpar(fill = "#E8F1FB", col = NA)),
+    t = 2, b = 2, l = 1, r = ncol(tumor_annot_tbl), z = 0, name = "hl"
+  )
+
+  fig_caption_grob <- grid::textGrob(
+    paste0(
+      "*Hypothesis-generating only (n = 5). Primary CRP endpoint was not met overall. ",
+      "Blue = shrinkage; orange = growth. ",
+      "Scan times = calendar days from that cycle IP start (C#D#). ",
+      "CRP = baseline -> nearest draw to best scan (+/-21 d)."
+    ),
+    x = 0, hjust = 0, gp = grid::gpar(fontsize = 9.5, col = "#444444", lineheight = 1.15)
+  )
+
+  # Joint figure: plot left, table right, caption below (before end of figure)
+  p_tumor_joint <- patchwork::wrap_plots(
+    p_tumor_waterfall,
+    patchwork::wrap_elements(full = tg),
+    widths = c(1.15, 1)
+  ) / patchwork::wrap_elements(full = fig_caption_grob) +
+    patchwork::plot_layout(heights = c(1, 0.14))
+
+  print(p_tumor_joint)
+  # Keep plot object for PNG export helpers
+  p_tumor_waterfall <- p_tumor_joint
 } else {
   p_tumor_waterfall <- NULL
   plot.new()
   text(0.5, 0.5, "No evaluable tumor-change data")
 }
-
-# =============================================================================
-# R chunk: tumor-waterfall-table  ()
-# =============================================================================
-tumor_annot_tbl <- tumor_waterfall_dat %>%
-  arrange(best_pct_change) %>%
-  transmute(
-    `Study ID` = if_else(highlight, paste0(as.character(study_id), "*"), as.character(study_id)),
-    `Tumor change` = sprintf("%+.0f%%", best_pct_change),
-    `CRP at that scan` = crp_change_lab,
-    `Prior IO` = prior_io_lab
-  )
-
-tumor_annot_tbl %>%
-  kbl(caption = tbl_cap(paste0(
-    "Figure 2 companion data. Main message: only ID 4* had tumor shrinkage; that patient had prior dual IO ",
-    "and higher CRP at the best-scan timepoint (exploratory; not proof of sensitization). ",
-    "CRP = baseline → value nearest best SOD scan (±21 days). ",
-    "Abbreviations: SOD, sum of diameters; CRP, C-reactive protein (mg/L); IO, immunotherapy."
-  ))) %>%
-  ctr_table_style() %>%
-  kableExtra::row_spec(1, bold = TRUE, background = "#E8F1FB") %>%
-  kableExtra::footnote(
-    general = "Rows ordered as in the waterfall (best → worst). Continued-dose schedule only.",
-    general_title = ""
-  )
 
 # =============================================================================
 # R chunk: crp-longitudinal-plot  (, fig.width = 9, fig.height = 11, fig.cap = fig_cap("Longitudinal peripheral blood CRP (mg/L) across protocol C1 visits (baseline C1D1 and post-baseline C1D8/C1D15) for enrolled patients with serial C1 values. Abbreviations: CRP, C-reactive protein."))
