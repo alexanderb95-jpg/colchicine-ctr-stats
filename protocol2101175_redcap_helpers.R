@@ -242,7 +242,7 @@ protocol2101175_protocol_era <- function(screening_event) {
 protocol2101175_protocol_era_label <- function(era) {
   dplyr::case_when(
     era == "original" ~ "Original schedule (indefinite colchicine + surveillance imaging)",
-    era == "amended" ~ "Amended schedule (fixed 2-week phase 0 intervention)",
+    era == "amended" ~ "Fixed 2-week schedule (phase 0 intervention)",
     era == "cohort2" ~ "Cohort 2 (closed; not enrolled)",
     TRUE ~ NA_character_
   )

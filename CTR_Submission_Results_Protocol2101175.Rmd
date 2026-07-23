@@ -18,6 +18,11 @@ output:
 knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, fig.width = 7, fig.height = 5)
 set.seed(123)
 
+protocol_id <- "STUDY-21-001175"
+protocol_version <- "3.0 (22 May 2023)"
+nct_id <- "NCT05279690"
+nct_url <- "https://clinicaltrials.gov/study/NCT05279690"
+
 suppressPackageStartupMessages({
   library(here)
   library(readr)
@@ -633,7 +638,7 @@ primary_assess %>%
 
 ## Accrual Disposition
 
-All `r consented_n` subjects who signed informed consent underwent screening evaluation. **During trial conduct, a protocol amendment limited on-study colchicine to a fixed 2-week course for patients enrolled under the amended schedule; patients enrolled under the original schedule received indefinite on-study colchicine with serial imaging surveillance.** `r enrolled_original_n` enrolled patients are included in Kaplan–Meier progression-free and overall survival analyses; `r enrolled_amended_n` enrolled after the amendment contributed to toxicity and primary CRP analyses but were excluded from survival estimates because they did not follow the same longitudinal imaging schedule. When organ-function or CRP thresholds were not met, the report states the clinical reason for screen failure and the screening laboratory value when available.
+All `r consented_n` subjects who signed informed consent underwent screening evaluation. **Protocol v3.0 specified two Cohort 1 treatment schedules: the original schedule (indefinite on-study colchicine with serial imaging surveillance) and a fixed 2-week course without transitioning patients already on the original schedule.** `r enrolled_original_n` enrolled patients are included in Kaplan–Meier progression-free and overall survival analyses; `r enrolled_amended_n` enrolled on the fixed 2-week schedule contributed to toxicity and primary CRP analyses but were excluded from survival estimates because they did not follow the same longitudinal imaging schedule. When organ-function or CRP thresholds were not met, the report states the clinical reason for screen failure and the screening laboratory value when available.
 
 ```{r accrual-disposition-table}
 accrual_overview <- tibble(
@@ -641,10 +646,10 @@ accrual_overview <- tibble(
     "Signed informed consent",
     "Enrolled on study",
     "  Original schedule (indefinite colchicine + surveillance imaging)",
-    "  Amended schedule (fixed 2-week phase 0 intervention)",
+    "  Fixed 2-week schedule (phase 0 intervention)",
     "Screen failure before enrollment",
-    "  Before original schedule",
-    "  After protocol amendment"
+    "  Original schedule",
+    "  Fixed 2-week schedule"
   ),
   N = c(
     consented_n,
@@ -661,7 +666,7 @@ accrual_overview <- tibble(
     Disposition == "Enrolled on study" ~ paste0(N, " (", trimws(fmt_num(100 * N / consented_n, 1)), "% of consented)"),
     Disposition == "Screen failure before enrollment" ~ paste0(N, " (", trimws(fmt_num(100 * N / consented_n, 1)), "% of consented)"),
     grepl("^  Original schedule", Disposition) ~ paste0(N, " (Kaplan–Meier–evaluable)"),
-    grepl("^  Amended schedule", Disposition) ~ paste0(N, " (primary CRP / toxicity only)"),
+    grepl("^  Fixed 2-week schedule", Disposition) ~ paste0(N, " (primary CRP / toxicity only)"),
     TRUE ~ paste0(N, " (", trimws(fmt_num(100 * N / consented_n, 1)), "% of consented)")
   ))
 
@@ -1364,7 +1369,7 @@ crp_response %>%
 
 Progression-free survival (PFS) and overall survival (OS) were **not recorded on the dedicated case report forms** in the available dataset. Endpoints below were derived per patient from: (1) RECIST 1.1 best overall response (progressive disease [PD] date); (2) protocol therapy discontinuation for documented progression; (3) final subject status and date of death or last contact. Time zero = first investigational product dispense date, or enrollment if missing.
 
-**Analyses in this section include only the `r km_eligible_n` patients enrolled under the original indefinite colchicine schedule with serial imaging surveillance.** The `r enrolled_amended_n` patients enrolled after the protocol amendment (fixed 2-week intervention) lacked the same longitudinal imaging framework and are reported for CRP pharmacodynamics and safety only.
+**Analyses in this section include only the `r km_eligible_n` patients enrolled under the original indefinite colchicine schedule with serial imaging surveillance.** The `r enrolled_amended_n` patients enrolled on the fixed 2-week schedule lacked the same longitudinal imaging framework and are reported for CRP pharmacodynamics and safety only.
 
 ```{r bor-summary}
 bor_tbl <- surv_dat %>%
@@ -1450,7 +1455,7 @@ if (!is.null(fit_os)) {
 }
 ```
 
-*These survival analyses are descriptive and underpowered (Kaplan–Meier cohort n = `r km_eligible_n`; total enrolled n = `r enrolled_n`). Medians and curves should be interpreted cautiously; several patients lack formal final-status forms but have tumor assessment or visit dates used for censoring. Patients enrolled after the protocol amendment (n = `r enrolled_amended_n`) are excluded because they received a fixed 2-week intervention without the same longitudinal imaging surveillance framework.*
+*These survival analyses are descriptive and underpowered (Kaplan–Meier cohort n = `r km_eligible_n`; total enrolled n = `r enrolled_n`). Medians and curves should be interpreted cautiously; several patients lack formal final-status forms but have tumor assessment or visit dates used for censoring. Patients on the fixed 2-week schedule (n = `r enrolled_amended_n`) are excluded because they did not receive the same longitudinal imaging surveillance framework.*
 
 ---
 
@@ -1458,7 +1463,7 @@ if (!is.null(fit_os)) {
 
 ### Primary hypothesis and test
 
-**Primary analysis (Cohort 1 low dose).** The primary endpoint was maximum percent decline in peripheral blood CRP from cycle 1 day 1 to the lowest on-treatment value during post-baseline cycle 1 visits (cycle 1 day 8 or day 15). We tested the prespecified null hypothesis **H0: mean maximum CRP decline = 0** against the one-sided alternative **H1: mean decline > 0** using a one-sample *t*-test. Per protocol Section 12.4, the overall Cohort 1 type I error was controlled at 0.05 across **two** planned primary tests (low-dose vs 0 and high-dose vs low-dose) using **Bonferroni’s method**, yielding **α = 0.025 for each test**. Because the high-dose sequential arm did not enroll, only the low-dose one-sample test was performed at α = 0.025. The observed mean decline was `r fmt_num(primary_mean)`% (SD `r fmt_num(primary_sd)`%); one-sided *p* = `r fmt_p(primary_p)`, **which does not reject H0 at the prespecified α = 0.025** (the primary endpoint was not met because *p* > 0.025, not because *p* > 0.05).
+**Primary analysis (Cohort 1 low dose).** The primary endpoint was maximum percent decline in peripheral blood CRP from cycle 1 day 1 to the lowest on-treatment value during post-baseline cycle 1 visits (cycle 1 day 8 or day 15). We tested the prespecified null hypothesis **H0: mean maximum CRP decline = 0** against the one-sided alternative **H1: mean decline > 0** using a one-sample *t*-test. Per [protocol `r protocol_id`, version `r protocol_version`](`r nct_url`) Section 12.4, the overall Cohort 1 type I error was controlled at 0.05 across **two** planned primary tests (low-dose vs 0 and high-dose vs low-dose) using **Bonferroni’s method**, yielding **α = 0.025 for each test**. Because the high-dose sequential arm did not enroll, only the low-dose one-sample test was performed at α = 0.025. The observed mean decline was `r fmt_num(primary_mean)`% (SD `r fmt_num(primary_sd)`%); one-sided *p* = `r fmt_p(primary_p)`, **which does not reject H0 at the prespecified α = 0.025** (the primary endpoint was not met because *p* > 0.025, not because *p* > 0.05).
 
 **Sample size and power.** The protocol planned **`r planned_evaluable_n` evaluable patients** in the low-dose cohort (80% power to detect a standardized effect size of 0.80 at α = 0.025). **`r evaluable_efficacy_n` evaluable patients** were analyzed. Post-hoc power to detect the **observed** effect (standardized effect size d ≈ `r fmt_num(cohens_d_primary, 2)`) at α = 0.025 was approximately **`r fmt_num(posthoc_power_pct, 0)`%**. At the full planned sample size of 15 with the same observed effect, post-hoc power would have been approximately **`r fmt_num(posthoc_power_at_planned_n_pct, 0)`%** — still below the protocol design target because the observed effect was smaller than the protocol assumption (d = 0.80).
 
@@ -1466,7 +1471,7 @@ if (!is.null(fit_os)) {
 
 ### Exploratory and safety analyses
 
-Exploratory progression-free and overall survival estimates used the Kaplan–Meier method among the `r km_eligible_n` patients enrolled under the original indefinite-treatment schedule with serial imaging surveillance (pre-amendment enrollments only). PFS and OS were derived from RECIST 1.1 assessments, protocol therapy discontinuation for progression, and final subject status when dedicated progression forms were incomplete. Treatment-related adverse events required Possible, Probable, or Definite attribution to colchicine and were summarized by CTCAE v5.0 preferred term and worst grade per patient. Analyses followed protocol v3.0 Section 12. [Supplementary statistical methods and analysis output](https://alexanderb95-jpg.github.io/colchicine-ctr-stats/statistical-analysis.html) are available separately.
+Exploratory progression-free and overall survival estimates used the Kaplan–Meier method among the `r km_eligible_n` patients enrolled under the original indefinite-treatment schedule with serial imaging surveillance only. PFS and OS were derived from RECIST 1.1 assessments, protocol therapy discontinuation for progression, and final subject status when dedicated progression forms were incomplete. Treatment-related adverse events required Possible, Probable, or Definite attribution to colchicine and were summarized by CTCAE v5.0 preferred term and worst grade per patient. Analyses followed [protocol `r protocol_id`, version `r protocol_version`](`r nct_url`) Section 12. [Supplementary statistical methods and analysis output](https://alexanderb95-jpg.github.io/colchicine-ctr-stats/statistical-analysis.html) are available separately.
 
 ---
 
@@ -1571,4 +1576,4 @@ included_tbl %>%
 
 ---
 
-`r if (params$public_site) "*Statistical methods follow protocol v3.0 Section 12.4.*" else "*Internal analytic report. Verify all numbers against source data and principal investigator review before journal submission.*"`
+`r if (params$public_site) paste0("*Statistical methods follow [protocol ", protocol_id, ", version ", protocol_version, "](", nct_url, ") Section 12.4.*") else "*Internal analytic report. Verify all numbers against source data and principal investigator review before journal submission.*"`

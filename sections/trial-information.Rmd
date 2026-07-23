@@ -20,10 +20,10 @@ trial_info <- tibble(
     "CTCAE v5.0 safety; PFS (Cohort 1); DFS/OS (Cohort 2); exploratory cytokines, ctDNA, tissue correlatives",
     paste0(
       "Cohort 1 low-dose (BID) and high-dose (TID) were sequential; only low-dose enrolled. ",
-      "Cohort 2 closed for poor accrual before enrollment. During conduct, the protocol was amended: ",
+      "Cohort 2 closed for poor accrual before enrollment. Under protocol v3.0, Cohort 1 used two schedules: ",
       "the first ", enrolled_original_n, " enrolled patients received indefinite on-study colchicine ",
       "with serial imaging surveillance; the subsequent ", enrolled_amended_n,
-      " enrolled patients received a fixed 2-week colchicine course (phase 0 pharmacodynamic design). ",
+      " enrolled patients received a fixed 2-week colchicine course (phase 0 design), without transitioning patients already on the original schedule. ",
       "Exploratory Kaplan–Meier PFS/OS analyses were restricted to the original-schedule cohort (n = ",
       km_eligible_n, ")."
     )

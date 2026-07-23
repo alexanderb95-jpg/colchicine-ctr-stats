@@ -250,7 +250,7 @@ protocol2101175_protocol_era <- function(screening_event) {
 protocol2101175_protocol_era_label <- function(era) {
   dplyr::case_when(
     era == "original" ~ "Original schedule (indefinite colchicine + surveillance imaging)",
-    era == "amended" ~ "Amended schedule (fixed 2-week phase 0 intervention)",
+    era == "amended" ~ "Fixed 2-week schedule (phase 0 intervention)",
     era == "cohort2" ~ "Cohort 2 (closed; not enrolled)",
     TRUE ~ NA_character_
   )
@@ -742,6 +742,11 @@ infer_primary_tumor_type <- function(study_id, therapy_names) {
 # =============================================================================
 knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, fig.width = 7, fig.height = 5)
 set.seed(123)
+
+protocol_id <- "STUDY-21-001175"
+protocol_version <- "3.0 (22 May 2023)"
+nct_id <- "NCT05279690"
+nct_url <- "https://clinicaltrials.gov/study/NCT05279690"
 
 suppressPackageStartupMessages({
   library(here)
@@ -1348,10 +1353,10 @@ accrual_overview <- tibble(
     "Signed informed consent",
     "Enrolled on study",
     "  Original schedule (indefinite colchicine + surveillance imaging)",
-    "  Amended schedule (fixed 2-week phase 0 intervention)",
+    "  Fixed 2-week schedule (phase 0 intervention)",
     "Screen failure before enrollment",
-    "  Before original schedule",
-    "  After protocol amendment"
+    "  Original schedule",
+    "  Fixed 2-week schedule"
   ),
   N = c(
     consented_n,
@@ -1368,7 +1373,7 @@ accrual_overview <- tibble(
     Disposition == "Enrolled on study" ~ paste0(N, " (", trimws(fmt_num(100 * N / consented_n, 1)), "% of consented)"),
     Disposition == "Screen failure before enrollment" ~ paste0(N, " (", trimws(fmt_num(100 * N / consented_n, 1)), "% of consented)"),
     grepl("^  Original schedule", Disposition) ~ paste0(N, " (Kaplan–Meier–evaluable)"),
-    grepl("^  Amended schedule", Disposition) ~ paste0(N, " (primary CRP / toxicity only)"),
+    grepl("^  Fixed 2-week schedule", Disposition) ~ paste0(N, " (primary CRP / toxicity only)"),
     TRUE ~ paste0(N, " (", trimws(fmt_num(100 * N / consented_n, 1)), "% of consented)")
   ))
 

@@ -286,7 +286,7 @@ protocol2101175_protocol_era &lt;- function(screening_event) {
 protocol2101175_protocol_era_label &lt;- function(era) {
   dplyr::case_when(
     era == &quot;original&quot; ~ &quot;Original schedule (indefinite colchicine + surveillance imaging)&quot;,
-    era == &quot;amended&quot; ~ &quot;Amended schedule (fixed 2-week phase 0 intervention)&quot;,
+    era == &quot;amended&quot; ~ &quot;Fixed 2-week schedule (phase 0 intervention)&quot;,
     era == &quot;cohort2&quot; ~ &quot;Cohort 2 (closed; not enrolled)&quot;,
     TRUE ~ NA_character_
   )
@@ -778,6 +778,11 @@ infer_primary_tumor_type &lt;- function(study_id, therapy_names) {
 # =============================================================================
 knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, fig.width = 7, fig.height = 5)
 set.seed(123)
+
+protocol_id &lt;- &quot;STUDY-21-001175&quot;
+protocol_version &lt;- &quot;3.0 (22 May 2023)&quot;
+nct_id &lt;- &quot;NCT05279690&quot;
+nct_url &lt;- &quot;https://clinicaltrials.gov/study/NCT05279690&quot;
 
 suppressPackageStartupMessages({
   library(here)
@@ -1384,10 +1389,10 @@ accrual_overview &lt;- tibble(
     &quot;Signed informed consent&quot;,
     &quot;Enrolled on study&quot;,
     &quot;  Original schedule (indefinite colchicine + surveillance imaging)&quot;,
-    &quot;  Amended schedule (fixed 2-week phase 0 intervention)&quot;,
+    &quot;  Fixed 2-week schedule (phase 0 intervention)&quot;,
     &quot;Screen failure before enrollment&quot;,
-    &quot;  Before original schedule&quot;,
-    &quot;  After protocol amendment&quot;
+    &quot;  Original schedule&quot;,
+    &quot;  Fixed 2-week schedule&quot;
   ),
   N = c(
     consented_n,
@@ -1404,7 +1409,7 @@ accrual_overview &lt;- tibble(
     Disposition == &quot;Enrolled on study&quot; ~ paste0(N, &quot; (&quot;, trimws(fmt_num(100 * N / consented_n, 1)), &quot;% of consented)&quot;),
     Disposition == &quot;Screen failure before enrollment&quot; ~ paste0(N, &quot; (&quot;, trimws(fmt_num(100 * N / consented_n, 1)), &quot;% of consented)&quot;),
     grepl(&quot;^  Original schedule&quot;, Disposition) ~ paste0(N, &quot; (Kaplan–Meier–evaluable)&quot;),
-    grepl(&quot;^  Amended schedule&quot;, Disposition) ~ paste0(N, &quot; (primary CRP / toxicity only)&quot;),
+    grepl(&quot;^  Fixed 2-week schedule&quot;, Disposition) ~ paste0(N, &quot; (primary CRP / toxicity only)&quot;),
     TRUE ~ paste0(N, &quot; (&quot;, trimws(fmt_num(100 * N / consented_n, 1)), &quot;% of consented)&quot;)
   ))
 
