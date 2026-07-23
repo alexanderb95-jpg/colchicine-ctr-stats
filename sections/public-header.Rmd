@@ -1,5 +1,5 @@
 # Colchicine Pilot Trial — Statistical Results
 
-**Protocol:** [`r protocol_id`](`r nct_url`), version `r protocol_version` | Trial registration: [`r nct_id`](`r nct_url`) | **Data cut:** `r format(Sys.Date(), "%d %B %Y")`
+Protocol: [`r protocol_id`](`r nct_url`), version `r protocol_version` | Trial registration: [`r nct_id`](`r nct_url`) | Data cut: `r format(Sys.Date(), "%d %B %Y")`
 
 ---

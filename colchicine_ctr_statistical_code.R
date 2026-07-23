@@ -2026,7 +2026,7 @@ ferritin_any_post_evaluable_n <- {
 }
 
 cat(
-  "\n\n**Ferritin evaluable count note:** baseline-to-post C1 (D8/D15) ferritin was available for ",
+  "\n\nFerritin evaluable count note: baseline-to-post C1 (D8/D15) ferritin was available for ",
   ferritin_c1_evaluable_n,
   " patient(s); using any post-baseline visit (any cycle) would yield ",
   ferritin_any_post_evaluable_n,
