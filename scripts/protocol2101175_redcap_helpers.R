@@ -187,7 +187,7 @@ protocol2101175_screen_fail_labels <- function(row, labs = NULL) {
     if (is.na(clinical_reason)) clinical_reason <- "Did not meet inclusion criteria"
     detail_parts <- c(
       detail_parts,
-      paste0("Additional inclusion criterion not met (REDCap code ", paste(other_inc, collapse = ", "), ")")
+      paste0("Additional inclusion criterion not met (code ", paste(other_inc, collapse = ", "), ")")
     )
   }
 
@@ -215,7 +215,7 @@ protocol2101175_screen_fail_labels <- function(row, labs = NULL) {
 
   if (length(detail_parts) == 0) {
     detail_parts <- if (!is.na(redcap_reason)) {
-      paste0("REDCap screen-fail category: ", redcap_reason)
+      paste0("Screening category: ", redcap_reason)
     } else {
       NA_character_
     }
@@ -724,7 +724,7 @@ infer_primary_tumor_type <- function(study_id, therapy_names) {
   )
   if (is.na(out)) {
     warning("Could not infer tumor type for study_id ", study_id, call. = FALSE)
-    out <- "Not specified in REDCap export"
+    out <- "Not specified in source records"
   }
   out
 }
