@@ -3,7 +3,6 @@ params:
   public_site: false
 title: "Colchicine Pilot Trial — Statistical Results"
 subtitle: "Clinical Trial Results (The Oncologist CTR format)"
-author: "Alexander B. Karol; Che-Kai Tsao, MD; Himanshu Joshi, PhD; Deborah Y. Doroshow, MD, PhD; Matthew D. Galsky, MD; Thomas Marron, MD, PhD"
 date: "`r format(Sys.Date(), '%B %d, %Y')`"
 output:
   html_document:
