@@ -13,7 +13,7 @@
 
 <meta name="date" content="2026-07-23" />
 
-<title>Colchicine to Suppress Pro-Tumorigenic Inflammation in Advanced Solid Tumors and Resected High-Risk Urothelial Carcinoma: A Pilot Trial</title>
+<title>Colchicine Pilot Trial — Statistical Results</title>
 
 <script>// Pandoc 2.9 adds attributes on both header and div. We remove the former (to
 // be compatible with the behavior of Pandoc < 2.8).
@@ -2992,9 +2992,8 @@ border-radius: 0px;
 
 
 
-<h1 class="title toc-ignore">Colchicine to Suppress Pro-Tumorigenic
-Inflammation in Advanced Solid Tumors and Resected High-Risk Urothelial
-Carcinoma: A Pilot Trial</h1>
+<h1 class="title toc-ignore">Colchicine Pilot Trial — Statistical
+Results</h1>
 <h3 class="subtitle">Clinical Trial Results (The Oncologist CTR
 format)</h3>
 <h4 class="author">Alexander B. Karol; Che-Kai Tsao, MD; Himanshu Joshi,
@@ -3005,349 +3004,17 @@ MD, PhD</h4>
 </div>
 
 
-<div id="inline-edit-toolbar" style="position:fixed;top:10px;right:10px;z-index:9999;background:#ffffff;border:1px solid #cfd8dc;border-radius:8px;padding:8px;box-shadow:0 2px 10px rgba(0,0,0,0.12);font-family:Arial,sans-serif;">
-<p><button id="toggle-inline-edit" style="margin-right:8px;">Enable Edit
-Mode</button>
-<button id="download-inline-html" disabled style="margin-right:8px;">Download
-Edited HTML</button>
-<button id="clear-inline-edits" title="Clear browser-saved edits for this report">Clear
-Saved Edits</button></p>
-</div>
-<script>
-(function () {
-  var editOn = false;
-  var root = document.querySelector(".main-container") || document.body;
-  var toggleBtn = document.getElementById("toggle-inline-edit");
-  var downloadBtn = document.getElementById("download-inline-html");
-  var clearBtn = document.getElementById("clear-inline-edits");
-  var toolbar = document.getElementById("inline-edit-toolbar");
-  var storageKey = "ctr_inline_edits:" + location.pathname;
-  var saveTimer = null;
-
-  function saveEdits() {
-    try {
-      localStorage.setItem(storageKey, root.innerHTML);
-    } catch (e) {
-      console.warn("Could not save local edits:", e);
-    }
-  }
-
-  function scheduleSave() {
-    if (!editOn) return;
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(saveEdits, 250);
-  }
-
-  function setEditState(next) {
-    editOn = next;
-    if (editOn) {
-      root.setAttribute("contenteditable", "true");
-      root.setAttribute("spellcheck", "true");
-      root.style.outline = "2px dashed #4a90e2";
-      root.style.outlineOffset = "6px";
-      toggleBtn.textContent = "Disable Edit Mode";
-      downloadBtn.disabled = false;
-    } else {
-      root.removeAttribute("contenteditable");
-      root.style.outline = "";
-      root.style.outlineOffset = "";
-      toggleBtn.textContent = "Enable Edit Mode";
-      downloadBtn.disabled = true;
-    }
-  }
-
-  function downloadEditedHtml() {
-    var prior = toolbar ? toolbar.style.display : "";
-    if (toolbar) toolbar.style.display = "none";
-    var html = "<!doctype html>\n" + document.documentElement.outerHTML;
-    if (toolbar) toolbar.style.display = prior;
-
-    var blob = new Blob([html], { type: "text/html;charset=utf-8" });
-    var url = URL.createObjectURL(blob);
-    var a = document.createElement("a");
-    a.href = url;
-    a.download = "CTR_Submission_Results_Protocol2101175_edited.html";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-  }
-
-  toggleBtn.addEventListener("click", function () {
-    setEditState(!editOn);
-  });
-
-  downloadBtn.addEventListener("click", downloadEditedHtml);
-  clearBtn.addEventListener("click", function () {
-    localStorage.removeItem(storageKey);
-    alert("Saved local edits cleared for this report URL.");
-  });
-
-  document.addEventListener("keydown", function (e) {
-    if (editOn && (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
-      e.preventDefault();
-      downloadEditedHtml();
-    }
-  });
-
-  root.addEventListener("input", scheduleSave);
-
-  try {
-    var saved = localStorage.getItem(storageKey);
-    if (saved && saved.length > 0) {
-      root.innerHTML = saved;
-    }
-  } catch (e) {
-    console.warn("Could not restore local edits:", e);
-  }
-})();
-</script>
-<div id="clinical-trial-results" class="section level1">
-<h1>Clinical Trial Results</h1>
-<p><strong>Protocol:</strong> STUDY-21-001175 (IND 156493), version 3.0
-(22 May 2023)<br />
-<strong>Institution:</strong> Icahn School of Medicine at Mount Sinai /
-Mount Sinai Hospital<br />
-<strong>Principal investigator:</strong> Deborah Y. Doroshow, MD,
-PhD<br />
+<div id="colchicine-pilot-trial-statistical-results" class="section level1">
+<h1>Colchicine Pilot Trial — Statistical Results</h1>
+<p><strong>Protocol:</strong> STUDY-21-001175 (NCT05279690) |
 <strong>Data cut:</strong> 23 July 2026 (REDCap export
 <code>ProtocolNo2101175PRM_DATA_2026-05-18_2135.csv</code>)</p>
 <hr />
-<div id="abstract" class="section level2">
-<h2>Abstract</h2>
-<p><strong>Background:</strong> Pro-tumorigenic inflammation in advanced
-solid tumors is linked to IL-1β–NLRP3 signaling and elevated C-reactive
-protein (CRP). We conducted a single-center open-label pilot trial to
-evaluate colchicine effects on peripheral blood CRP in patients with
-advanced or recurrent solid tumors.</p>
-<p><strong>Methods:</strong> Eligible patients had metastatic or
-recurrent solid tumors with CRP greater than 5 mg/L and received
-colchicine 0.6 mg orally twice daily (Cohort 1 low dose). A protocol
-amendment limited later enrollments to a fixed 2-week course; earlier
-enrollments received indefinite colchicine with serial imaging. The
-primary endpoint was maximum percent CRP decline from cycle 1 day 1 to
-the lowest on-treatment value. Planned high-dose and adjuvant cohorts
-did not accrue.</p>
-<p><strong>Results:</strong> 16 patients consented; 11 enrolled and 5
-screen-failed. 7 were treated under the original schedule and 4 under
-the amended schedule. 11 patients were evaluable for the primary
-endpoint. Mean maximum CRP decline was 18.7% (SD 28.5%); one-sided
-one-sample <em>t</em>-test <em>p</em> = 0.028, not meeting prespecified
-α = 0.025. Treatment-related adverse events occurred in 5 of 11 patients
-(45.5%); all were grade 1–2, most commonly diarrhea (4/11, 36.4%).</p>
-<p><strong>Conclusion:</strong> Colchicine 0.6 mg twice daily was
-tolerable with modest CRP suppression but did not meet the prespecified
-primary endpoint. The data do not support colchicine as a
-re-sensitization strategy in this setting. Trial registration:
-ClinicalTrials.gov, NCT05279690.</p>
-<p><strong>Key words:</strong> colchicine; C-reactive protein;
-inflammation; solid tumors; pilot trial</p>
-<hr />
-</div>
-<div id="lessons-learned" class="section level2">
-<h2>Lessons Learned</h2>
-<ul>
-<li><strong>Key outcome:</strong> The prespecified primary CRP endpoint
-was not met (one-sided <em>p</em> = 0.028 vs α = 0.025). With only 11 of
-15 planned evaluable patients, the trial was underpowered to confirm the
-observed 18.7% mean CRP decline at the prespecified significance
-threshold.</li>
-<li><strong>Key lesson:</strong> Short-course low-dose colchicine was
-tolerable but yielded only a modest pharmacodynamic signal; future
-inflammation-modulation pilots in advanced solid tumors will likely need
-narrower disease selection, less restrictive eligibility, or larger
-cohorts to draw definitive conclusions.</li>
-<li><strong>Key reason:</strong> Accrual lagged because eligible
-patients were difficult to identify in routine oncology clinics (CRP
-greater than 5 mg/L plus organ-function requirements), 5 of 16 consented
-patients (31.2%) screen-failed before treatment (including 2 patient
-withdrawals, 1 organ dysfunction, and 1 acute clinical deterioration),
-and the adjuvant urothelial carcinoma cohort closed with zero
-enrollments.</li>
-</ul>
-<hr />
-</div>
-<div id="trial-information" class="section level2">
-<h2>Trial Information</h2>
-<table class="table table-striped table-hover" style="width: auto !important; margin-left: auto; margin-right: auto;">
-<caption>
-Table 1. Trial information.
-</caption>
-<thead>
-<tr>
-<th style="text-align:left;font-weight: bold;background-color: rgba(217, 226, 243, 255) !important;">
-Trial information
-</th>
-<th style="text-align:left;font-weight: bold;background-color: rgba(217, 226, 243, 255) !important;">
-Description
-</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td style="text-align:left;">
-Disease
-</td>
-<td style="text-align:left;">
-Advanced/recurrent solid tumors (Cohort 1); resected high-risk
-urothelial carcinoma planned for adjuvant nivolumab (Cohort 2, closed to
-accrual)
-</td>
-</tr>
-<tr>
-<td style="text-align:left;">
-Stage of disease / treatment
-</td>
-<td style="text-align:left;">
-Metastatic/recurrent solid tumors (Cohort 1); post-surgical high-risk
-urothelial carcinoma (Cohort 2, not enrolled)
-</td>
-</tr>
-<tr>
-<td style="text-align:left;">
-Prior therapy
-</td>
-<td style="text-align:left;">
-Variable prior systemic and local therapy per disease (see Patient
-Characteristics)
-</td>
-</tr>
-<tr>
-<td style="text-align:left;">
-Type of study
-</td>
-<td style="text-align:left;">
-Single-center, open-label, non-randomized pilot
-</td>
-</tr>
-<tr>
-<td style="text-align:left;">
-Primary endpoint
-</td>
-<td style="text-align:left;">
-Maximum percentage decline in peripheral blood CRP from cycle 1 day 1
-during on-study colchicine
-</td>
-</tr>
-<tr>
-<td style="text-align:left;">
-Secondary endpoints
-</td>
-<td style="text-align:left;">
-CTCAE v5.0 safety; PFS (Cohort 1); DFS/OS (Cohort 2); exploratory
-cytokines, ctDNA, tissue correlatives
-</td>
-</tr>
-<tr>
-<td style="text-align:left;">
-Additional details
-</td>
-<td style="text-align:left;">
-Cohort 1 low-dose (BID) and high-dose (TID) were sequential; only
-low-dose enrolled. Cohort 2 closed for poor accrual before enrollment.
-During conduct, the protocol was amended: the first 7 enrolled patients
-received indefinite on-study colchicine with serial imaging
-surveillance; the subsequent 4 enrolled patients received a fixed 2-week
-colchicine course (phase 0 pharmacodynamic design). Exploratory
-Kaplan–Meier PFS/OS analyses were restricted to the original-schedule
-cohort (n = 7).
-</td>
-</tr>
-</tbody>
-</table>
-<hr />
-</div>
-<div id="drug-information" class="section level2">
-<h2>Drug Information</h2>
-<table class="table table-striped table-hover" style="width: auto !important; margin-left: auto; margin-right: auto;">
-<caption>
-Table 2. Drug information.
-</caption>
-<thead>
-<tr>
-<th style="text-align:left;font-weight: bold;background-color: rgba(217, 226, 243, 255) !important;">
-Drug information
-</th>
-<th style="text-align:left;font-weight: bold;background-color: rgba(217, 226, 243, 255) !important;">
-Details
-</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td style="text-align:left;">
-Generic/working name
-</td>
-<td style="text-align:left;">
-Colchicine
-</td>
-</tr>
-<tr>
-<td style="text-align:left;">
-Drug type
-</td>
-<td style="text-align:left;">
-Anti-inflammatory alkaloid
-</td>
-</tr>
-<tr>
-<td style="text-align:left;">
-Drug class
-</td>
-<td style="text-align:left;">
-Microtubule polymerization inhibitor (indirect NLRP3 pathway modulation)
-</td>
-</tr>
-<tr>
-<td style="text-align:left;">
-Dose (Cohort 1 low)
-</td>
-<td style="text-align:left;">
-0.6 mg oral BID × 14 days
-</td>
-</tr>
-<tr>
-<td style="text-align:left;">
-Dose (Cohort 1 high)
-</td>
-<td style="text-align:left;">
-0.6 mg oral TID × 14 days (not enrolled)
-</td>
-</tr>
-<tr>
-<td style="text-align:left;">
-Dose (Cohort 2)
-</td>
-<td style="text-align:left;">
-0.6 mg oral BID × 28 days with nivolumab 480 mg IV every 4 weeks (cohort
-closed)
-</td>
-</tr>
-<tr>
-<td style="text-align:left;">
-Route
-</td>
-<td style="text-align:left;">
-Oral
-</td>
-</tr>
-<tr>
-<td style="text-align:left;">
-Schedule
-</td>
-<td style="text-align:left;">
-One cycle per protocol; missed doses not doubled
-</td>
-</tr>
-</tbody>
-</table>
-<hr />
-</div>
 <div id="primary-assessment-method" class="section level2">
 <h2>Primary Assessment Method</h2>
 <table class="table table-striped table-hover" style="width: auto !important; margin-left: auto; margin-right: auto;">
 <caption>
-Table 3. Primary assessment method.
+Table 1. Primary assessment method.
 </caption>
 <thead>
 <tr>
@@ -3411,7 +3078,7 @@ Number evaluable for primary efficacy (CRP)
 </tr>
 <tr>
 <td style="text-align:left;">
-Evaluation method
+Endpoint definition
 </td>
 <td style="text-align:left;">
 Peripheral blood CRP (mg/L) at protocol C1 visits; baseline = cycle 1
@@ -3422,11 +3089,48 @@ primary endpoint per protocol treatment window.
 </tr>
 <tr>
 <td style="text-align:left;">
+Null hypothesis (H0)
+</td>
+<td style="text-align:left;">
+Mean maximum percent CRP decline = 0 (colchicine does not reduce
+post-treatment CRP)
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+Alternative hypothesis (H1, one-sided)
+</td>
+<td style="text-align:left;">
+Mean maximum percent CRP decline &gt; 0
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+Statistical test
+</td>
+<td style="text-align:left;">
+One-sample one-sided t-test on patient-level maximum percent CRP
+declines
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+Significance level (α)
+</td>
+<td style="text-align:left;">
+α = 0.025 per protocol Section 12.4 (Bonferroni adjustment of overall α
+= 0.05 across two planned Cohort 1 primary tests: low-dose vs 0 and
+high-dose vs low-dose; high-dose arm did not enroll, so only the
+low-dose one-sample test was performed)
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
 Primary analysis result (Cohort 1 low dose)
 </td>
 <td style="text-align:left;">
 Mean max decline 18.7% (SD 28.5%); one-sided one-sample t-test vs 0, t =
-2.17, p = 0.028 (prespecified α = 0.025)
+2.17, p = 0.028; does not reject H0 at prespecified α = 0.025
 </td>
 </tr>
 </tbody>
@@ -3452,7 +3156,7 @@ these as “inclusion criteria” screen failures because adequate organ
 function and CRP elevation are protocol inclusion requirements.</p>
 <table class="table table-striped table-hover" style="width: auto !important; margin-left: auto; margin-right: auto;">
 <caption>
-Table 4. Accrual disposition among consented subjects.
+Table 2. Accrual disposition among consented subjects.
 </caption>
 <thead>
 <tr>
@@ -3549,7 +3253,7 @@ After protocol amendment
 </table>
 <table class="table table-striped table-hover" style="width: auto !important; margin-left: auto; margin-right: auto;">
 <caption>
-Table 5. Reasons for screen failure before enrollment.
+Table 3. Reasons for screen failure before enrollment.
 </caption>
 <thead>
 <tr>
@@ -3630,7 +3334,7 @@ hemorrhage
 </table>
 <table class="table table-striped table-hover" style="width: auto !important; margin-left: auto; margin-right: auto;">
 <caption>
-Table 6. Screen-failure subjects: reason and supporting detail.
+Table 4. Screen-failure subjects: reason and supporting detail.
 </caption>
 <thead>
 <tr>
@@ -3711,7 +3415,7 @@ CRP 4.6 mg/L (required &gt;5 mg/L)
 <h2>Patient Characteristics</h2>
 <table class="table table-striped table-hover" style="width: auto !important; margin-left: auto; margin-right: auto;">
 <caption>
-Table 7. Patient characteristics (Cohort 1 low dose).
+Table 5. Patient characteristics (Cohort 1 low dose).
 </caption>
 <thead>
 <tr>
@@ -3888,11 +3592,17 @@ Surgery, n (%)
 </div>
 <div id="primary-assessment-results" class="section level2">
 <h2>Primary Assessment Results</h2>
+<p>The primary endpoint was tested per protocol Section 12.4 at
+prespecified <strong>H0: mean maximum CRP decline = 0</strong> versus
+<strong>H1: mean decline &gt; 0</strong> (one-sided), with <strong>α =
+0.025</strong> after Bonferroni adjustment for two planned Cohort 1
+tests; only the low-dose one-sample test was performed because the
+high-dose arm did not enroll.</p>
 <div id="crp-endpoint-by-patient" class="section level3">
 <h3>CRP endpoint by patient</h3>
 <table class="table table-striped table-hover" style="width: auto !important; margin-left: auto; margin-right: auto;">
 <caption>
-Table 8. Primary CRP endpoint derivation by enrolled patient.
+Table 6. Primary CRP endpoint derivation by enrolled patient.
 </caption>
 <thead>
 <tr>
@@ -4144,7 +3854,7 @@ per patient per preferred term</strong> (if multiple grades are recorded
 for the same term, only the maximum grade is counted).</p>
 <table class="table table-striped table-hover" style="width: auto !important; margin-left: auto; margin-right: auto;">
 <caption>
-Table 9. Treatment-related adverse events by CTCAE v5 preferred term and
+Table 7. Treatment-related adverse events by CTCAE v5 preferred term and
 worst grade per patient (N = 11). Patients with any grade ≥3 event: 0%.
 </caption>
 <thead>
@@ -4249,7 +3959,7 @@ included CRP (primary), ferritin, and erythrocyte sedimentation rate
 (ESR) when collected per protocol.</p>
 <table class="table table-striped table-hover" style="width: auto !important; margin-left: auto; margin-right: auto;">
 <caption>
-Table 10. Pharmacodynamic laboratory values (all on-study assessments,
+Table 8. Pharmacodynamic laboratory values (all on-study assessments,
 enrolled patients).
 </caption>
 <thead>
@@ -4303,7 +4013,7 @@ Ferritin (µg/dL)
 </table>
 <table class="table table-striped table-hover" style="width: auto !important; margin-left: auto; margin-right: auto;">
 <caption>
-Table 11. Pharmacodynamic decline from baseline to minimum post-baseline
+Table 9. Pharmacodynamic decline from baseline to minimum post-baseline
 C1 value (C1D8/C1D15). Decline is bounded at 0% (no decline).
 </caption>
 <thead>
@@ -4367,7 +4077,7 @@ Ferritin (µg/dL)
 post-baseline visit (any cycle) would yield 8 patient(s).</p>
 <table class="table table-striped table-hover" style="width: auto !important; margin-left: auto; margin-right: auto;">
 <caption>
-Table 12. CRP pharmacodynamic response summary among evaluable patients.
+Table 10. CRP pharmacodynamic response summary among evaluable patients.
 </caption>
 <thead>
 <tr>
@@ -4422,7 +4132,7 @@ same longitudinal imaging framework and are reported for CRP
 pharmacodynamics and safety only.</p>
 <table class="table table-striped table-hover" style="width: auto !important; margin-left: auto; margin-right: auto;">
 <caption>
-Table 13. Exploratory best overall response (RECIST 1.1) among
+Table 11. Exploratory best overall response (RECIST 1.1) among
 original-schedule enrolled patients (Kaplan–Meier cohort).
 </caption>
 <thead>
@@ -4476,7 +4186,7 @@ PD
 </table>
 <table class="table table-striped table-hover" style="width: auto !important; margin-left: auto; margin-right: auto;">
 <caption>
-Table 14. Exploratory progression-free survival and overall survival
+Table 12. Exploratory progression-free survival and overall survival
 summary (Kaplan–Meier medians; original-schedule cohort, n = 7).
 </caption>
 <thead>
@@ -4528,7 +4238,7 @@ Not reached / not estimable
 </table>
 <table class="table table-striped table-hover" style="width: auto !important; margin-left: auto; margin-right: auto;">
 <caption>
-Table 15. Patient-level progression-free survival and overall survival
+Table 13. Patient-level progression-free survival and overall survival
 among original-schedule enrolled patients (derived from RECIST,
 discontinuation, and final status fields).
 </caption>
@@ -4824,101 +4534,54 @@ same longitudinal imaging surveillance framework.</em></p>
 </div>
 <div id="statistical-analysis" class="section level2">
 <h2>Statistical Analysis</h2>
-<p>Analyses followed protocol v3.0 (Section 12). The primary endpoint
-was tested with a one-sided one-sample <em>t</em>-test (H<sub>0</sub>:
-mean maximum CRP decline = 0) at α = 0.025 per the Bonferroni-adjusted
-Cohort 1 low-dose analysis plan. Exploratory progression-free and
-overall survival estimates used the Kaplan–Meier method
-(<code>survival</code> package in R) among the 7 patients enrolled under
-the original indefinite-treatment schedule with serial imaging
-surveillance (pre-amendment enrollments only). PFS and OS were derived
-from RECIST 1.1 assessments, protocol therapy discontinuation for
-progression, and final subject status because dedicated PFS/OS case
-report forms were incomplete in this export. Treatment-related adverse
-events required Possible, Probable, or Definite attribution to
-colchicine and were summarized by CTCAE v5.0 preferred term and worst
-grade per patient. Primary and exploratory analyses were performed in R
-per protocol v3.0 Section 12. Annotated R code and primary output are
-provided in the <a href="https://alexanderb95-jpg.github.io/colchicine-ctr-stats/statistical-analysis.html">statistical
+<div id="primary-hypothesis-and-test" class="section level3">
+<h3>Primary hypothesis and test</h3>
+<p><strong>Primary analysis (Cohort 1 low dose).</strong> The primary
+endpoint was maximum percent decline in peripheral blood CRP from cycle
+1 day 1 to the lowest on-treatment value during post-baseline cycle 1
+visits (C1D8/C1D15). We tested the prespecified null hypothesis
+<strong>H0: mean maximum CRP decline = 0</strong> against the one-sided
+alternative <strong>H1: mean decline &gt; 0</strong> using a one-sample
+<em>t</em>-test. Per protocol Section 12.4, the overall Cohort 1 type I
+error was controlled at 0.05 across <strong>two</strong> planned primary
+tests (low-dose vs 0 and high-dose vs low-dose) using
+<strong>Bonferroni’s method</strong>, yielding <strong>α = 0.025 for
+each test</strong>. Because the high-dose sequential arm did not enroll,
+only the low-dose one-sample test was performed at α = 0.025. The
+observed mean decline was 18.7% (SD 28.5%); one-sided <em>p</em> =
+0.028, <strong>which does not reject H0 at the prespecified α =
+0.025</strong> (i.e., the primary endpoint was not met because
+<em>p</em> &gt; 0.025, not because <em>p</em> &gt; 0.05).</p>
+<p>With 11 evaluable patients instead of the planned 15 per low-dose
+group, the completed analysis was underpowered to confirm the observed
+effect at α = 0.025 (post-hoc power ≈ 50% for Cohen’s d ≈ 0.65).</p>
+<p><em>Contextual note:</em> With only one of two Bonferroni-planned
+tests executed, α = 0.025 is conservative relative to a single-test α =
+0.05; this does not revise the prespecified conclusion.</p>
+</div>
+<div id="exploratory-and-safety-analyses" class="section level3">
+<h3>Exploratory and safety analyses</h3>
+<p>Exploratory progression-free and overall survival estimates used the
+Kaplan–Meier method (<code>survival</code> package in R) among the 7
+patients enrolled under the original indefinite-treatment schedule with
+serial imaging surveillance (pre-amendment enrollments only). PFS and OS
+were derived from RECIST 1.1 assessments, protocol therapy
+discontinuation for progression, and final subject status because
+dedicated PFS/OS case report forms were incomplete in this export.
+Treatment-related adverse events required Possible, Probable, or
+Definite attribution to colchicine and were summarized by CTCAE v5.0
+preferred term and worst grade per patient. Primary and exploratory
+analyses were performed in R per protocol v3.0 Section 12. Annotated R
+code and primary output are provided in the <a href="https://alexanderb95-jpg.github.io/colchicine-ctr-stats/statistical-analysis.html">statistical
 analysis file</a>.</p>
 <hr />
 </div>
-<div id="discussion" class="section level2">
-<h2>Discussion</h2>
-<p>This single-center pilot (STUDY-21-001175) evaluated whether
-short-course low-dose colchicine could suppress peripheral blood CRP in
-patients with advanced or recurrent solid tumors. The trial closed under
-planned accrual: Cohort 1 low dose enrolled 11 patients, the high-dose
-sequential arm never opened, and Cohort 2 (resected high-risk urothelial
-carcinoma planned for adjuvant nivolumab) closed before enrollment
-because of poor accrual.</p>
-<p>Among 16 consenting patients, 5 (31.2%) were screen failures before
-enrollment. 11 of 11 enrolled patients were evaluable for the primary
-endpoint. The mean maximum CRP decline was 18.7% (SD 28.5%). The
-prespecified one-sided one-sample <em>t</em>-test yielded <em>p</em> =
-0.028, which does not meet the protocol’s multiplicity-adjusted α =
-0.025 threshold.</p>
-<p>With 11 evaluable patients instead of the planned 15 per low-dose
-group, post-hoc power to detect the observed effect (Cohen’s d ≈ 0.65)
-at α = 0.025 was approximately 50%.</p>
-<p>Colchicine 0.6 mg twice daily for 14 days was well tolerated with
-grade 1–2 treatment-related adverse events only. Exploratory RECIST and
-Kaplan–Meier analyses were underpowered. These findings provide
-preliminary biologic proof-of-concept for inflammatory modulation but do
-not support colchicine as an effective re-sensitization strategy.</p>
-<hr />
-</div>
-<div id="acknowledgments" class="section level2">
-<h2>Acknowledgments</h2>
-<p>[To be completed by investigators.]</p>
-</div>
-<div id="funding" class="section level2">
-<h2>Funding</h2>
-<p>[To be completed.]</p>
-</div>
-<div id="conflict-of-interest" class="section level2">
-<h2>Conflict of Interest</h2>
-<p>[To be completed.]</p>
-</div>
-<div id="data-availability" class="section level2">
-<h2>Data Availability</h2>
-<p>De-identified data may be made available upon reasonable request to
-the corresponding author and subject to institutional approval.</p>
-</div>
-<div id="author-contributions" class="section level2">
-<h2>Author Contributions</h2>
-<p>[To be completed.]</p>
-</div>
-<div id="references" class="section level2">
-<h2>References</h2>
-<ol style="list-style-type: decimal">
-<li>Doroshow DB, Galsky MD, Marron TU, et al. Protocol STUDY-21-001175,
-version 3.0 (22 May 2023). Icahn School of Medicine at Mount
-Sinai.<br />
-</li>
-<li>Tran M, et al. <a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC13069984/">Pro-tumorigenic
-inflammation / urothelial carcinoma translational study;
-PMC13069984</a>.<br />
-</li>
-<li>Ridker PM, et al. CANTOS trial. <em>Lancet</em>. 2017.<br />
-</li>
-<li>CheckMate 274: adjuvant nivolumab in high-risk urothelial
-carcinoma.</li>
-</ol>
-<hr />
-</div>
-<div id="figures-and-tables" class="section level2">
-<h2>Figures and Tables</h2>
-<p>All primary tables and figures are embedded in the sections above.
-Additional correlative analyses (ctDNA, cytokines, single-cell myeloid
-signatures) were prespecified but are not included in this CTR results
-report pending separate correlative manuscripts.</p>
 </div>
 <div id="appendix-included-subjects-dataset" class="section level2">
 <h2>Appendix: Included Subjects Dataset</h2>
 <table class="table table-striped table-hover" style="width: auto !important; margin-left: auto; margin-right: auto;">
 <caption>
-Table 16. Subject-level dataset for patients included in primary
+Table 14. Subject-level dataset for patients included in primary
 endpoint analysis (N = 11).
 </caption>
 <thead>

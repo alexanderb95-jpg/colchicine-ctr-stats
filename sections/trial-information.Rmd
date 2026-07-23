@@ -1,0 +1,41 @@
+## Trial Information
+
+```{r trial-info-table}
+trial_info <- tibble(
+  Field = c(
+    "Disease",
+    "Stage of disease / treatment",
+    "Prior therapy",
+    "Type of study",
+    "Primary endpoint",
+    "Secondary endpoints",
+    "Additional details"
+  ),
+  Description = c(
+    "Advanced/recurrent solid tumors (Cohort 1); resected high-risk urothelial carcinoma planned for adjuvant nivolumab (Cohort 2, closed to accrual)",
+    "Metastatic/recurrent solid tumors (Cohort 1); post-surgical high-risk urothelial carcinoma (Cohort 2, not enrolled)",
+    "Variable prior systemic and local therapy per disease (see Patient Characteristics)",
+    "Single-center, open-label, non-randomized pilot",
+    "Maximum percentage decline in peripheral blood CRP from cycle 1 day 1 during on-study colchicine",
+    "CTCAE v5.0 safety; PFS (Cohort 1); DFS/OS (Cohort 2); exploratory cytokines, ctDNA, tissue correlatives",
+    paste0(
+      "Cohort 1 low-dose (BID) and high-dose (TID) were sequential; only low-dose enrolled. ",
+      "Cohort 2 closed for poor accrual before enrollment. During conduct, the protocol was amended: ",
+      "the first ", enrolled_original_n, " enrolled patients received indefinite on-study colchicine ",
+      "with serial imaging surveillance; the subsequent ", enrolled_amended_n,
+      " enrolled patients received a fixed 2-week colchicine course (phase 0 pharmacodynamic design). ",
+      "Exploratory Kaplan–Meier PFS/OS analyses were restricted to the original-schedule cohort (n = ",
+      km_eligible_n, ")."
+    )
+  )
+)
+trial_info %>%
+  kbl(
+    caption = tbl_cap("Trial information."),
+    col.names = c("Trial information", "Description"),
+    align = c("l", "l")
+  ) %>%
+  ctr_table_style()
+```
+
+---

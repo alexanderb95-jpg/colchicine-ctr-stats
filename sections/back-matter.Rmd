@@ -1,0 +1,28 @@
+## Acknowledgments
+
+[To be completed by investigators.]
+
+## Funding
+
+[To be completed.]
+
+## Conflict of Interest
+
+[To be completed.]
+
+## Data Availability
+
+De-identified data may be made available upon reasonable request to the corresponding author and subject to institutional approval.
+
+## Author Contributions
+
+[To be completed.]
+
+## References
+
+1. Doroshow DB, Galsky MD, Marron TU, et al. Protocol STUDY-21-001175, version 3.0 (22 May 2023). Icahn School of Medicine at Mount Sinai.  
+2. Tran M, et al. [Pro-tumorigenic inflammation / urothelial carcinoma translational study; PMC13069984](https://pmc.ncbi.nlm.nih.gov/articles/PMC13069984/).  
+3. Ridker PM, et al. CANTOS trial. *Lancet*. 2017.  
+4. CheckMate 274: adjuvant nivolumab in high-risk urothelial carcinoma.  
+
+---

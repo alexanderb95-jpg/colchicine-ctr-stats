@@ -1310,68 +1310,6 @@ ctr_table_style &lt;- function(kbl) {
 }
 
 # =============================================================================
-# R chunk: trial-info-table  ()
-# =============================================================================
-trial_info &lt;- tibble(
-  Field = c(
-    &quot;Disease&quot;,
-    &quot;Stage of disease / treatment&quot;,
-    &quot;Prior therapy&quot;,
-    &quot;Type of study&quot;,
-    &quot;Primary endpoint&quot;,
-    &quot;Secondary endpoints&quot;,
-    &quot;Additional details&quot;
-  ),
-  Description = c(
-    &quot;Advanced/recurrent solid tumors (Cohort 1); resected high-risk urothelial carcinoma planned for adjuvant nivolumab (Cohort 2, closed to accrual)&quot;,
-    &quot;Metastatic/recurrent solid tumors (Cohort 1); post-surgical high-risk urothelial carcinoma (Cohort 2, not enrolled)&quot;,
-    &quot;Variable prior systemic and local therapy per disease (see Patient Characteristics)&quot;,
-    &quot;Single-center, open-label, non-randomized pilot&quot;,
-    &quot;Maximum percentage decline in peripheral blood CRP from cycle 1 day 1 during on-study colchicine&quot;,
-    &quot;CTCAE v5.0 safety; PFS (Cohort 1); DFS/OS (Cohort 2); exploratory cytokines, ctDNA, tissue correlatives&quot;,
-    paste0(
-      &quot;Cohort 1 low-dose (BID) and high-dose (TID) were sequential; only low-dose enrolled. &quot;,
-      &quot;Cohort 2 closed for poor accrual before enrollment. During conduct, the protocol was amended: &quot;,
-      &quot;the first &quot;, enrolled_original_n, &quot; enrolled patients received indefinite on-study colchicine &quot;,
-      &quot;with serial imaging surveillance; the subsequent &quot;, enrolled_amended_n,
-      &quot; enrolled patients received a fixed 2-week colchicine course (phase 0 pharmacodynamic design). &quot;,
-      &quot;Exploratory Kaplan–Meier PFS/OS analyses were restricted to the original-schedule cohort (n = &quot;,
-      km_eligible_n, &quot;).&quot;
-    )
-  )
-)
-trial_info %&gt;%
-  kbl(
-    caption = tbl_cap(&quot;Trial information.&quot;),
-    col.names = c(&quot;Trial information&quot;, &quot;Description&quot;),
-    align = c(&quot;l&quot;, &quot;l&quot;)
-  ) %&gt;%
-  ctr_table_style()
-
-# =============================================================================
-# R chunk: drug-info-table  ()
-# =============================================================================
-drug_info &lt;- tibble(
-  `Drug information` = c(
-    &quot;Generic/working name&quot;, &quot;Drug type&quot;, &quot;Drug class&quot;, &quot;Dose (Cohort 1 low)&quot;,
-    &quot;Dose (Cohort 1 high)&quot;, &quot;Dose (Cohort 2)&quot;, &quot;Route&quot;, &quot;Schedule&quot;
-  ),
-  Details = c(
-    &quot;Colchicine&quot;, &quot;Anti-inflammatory alkaloid&quot;, &quot;Microtubule polymerization inhibitor (indirect NLRP3 pathway modulation)&quot;,
-    &quot;0.6 mg oral BID × 14 days&quot;, &quot;0.6 mg oral TID × 14 days (not enrolled)&quot;,
-    &quot;0.6 mg oral BID × 28 days with nivolumab 480 mg IV every 4 weeks (cohort closed)&quot;,
-    &quot;Oral&quot;, &quot;One cycle per protocol; missed doses not doubled&quot;
-  )
-)
-drug_info %&gt;%
-  kbl(
-    caption = tbl_cap(&quot;Drug information.&quot;),
-    col.names = c(&quot;Drug information&quot;, &quot;Details&quot;),
-    align = c(&quot;l&quot;, &quot;l&quot;)
-  ) %&gt;%
-  ctr_table_style()
-
-# =============================================================================
 # R chunk: primary-assessment-table  ()
 # =============================================================================
 primary_assess &lt;- tibble(
@@ -1382,7 +1320,11 @@ primary_assess &lt;- tibble(
     &quot;Number of screen failures before enrollment&quot;,
     &quot;Number evaluable for toxicity&quot;,
     &quot;Number evaluable for primary efficacy (CRP)&quot;,
-    &quot;Evaluation method&quot;,
+    &quot;Endpoint definition&quot;,
+    &quot;Null hypothesis (H0)&quot;,
+    &quot;Alternative hypothesis (H1, one-sided)&quot;,
+    &quot;Statistical test&quot;,
+    &quot;Significance level (α)&quot;,
     &quot;Primary analysis result (Cohort 1 low dose)&quot;
   ),
   Value = c(
@@ -1393,10 +1335,16 @@ primary_assess &lt;- tibble(
     as.character(evaluable_toxicity_n),
     as.character(evaluable_efficacy_n),
     &quot;Peripheral blood CRP (mg/L) at protocol C1 visits; baseline = cycle 1 day 1 (or screening fallback if missing); minimum post-baseline value at C1D8/C1D15 used for maximum decline. Cycle 2 values excluded from primary endpoint per protocol treatment window.&quot;,
+    &quot;Mean maximum percent CRP decline = 0 (colchicine does not reduce post-treatment CRP)&quot;,
+    &quot;Mean maximum percent CRP decline &gt; 0&quot;,
+    &quot;One-sample one-sided t-test on patient-level maximum percent CRP declines&quot;,
+    paste0(
+      &quot;α = 0.025 per protocol Section 12.4 (Bonferroni adjustment of overall α = 0.05 across two planned Cohort 1 primary tests: low-dose vs 0 and high-dose vs low-dose; high-dose arm did not enroll, so only the low-dose one-sample test was performed)&quot;
+    ),
     paste0(
       &quot;Mean max decline &quot;, fmt_num(primary_mean), &quot;% (SD &quot;, fmt_num(primary_sd), &quot;%); &quot;,
       &quot;one-sided one-sample t-test vs 0, t = &quot;, fmt_num(primary_t, 2), &quot;, p = &quot;, fmt_p(primary_p),
-      &quot; (prespecified α = 0.025)&quot;
+      &quot;; does not reject H0 at prespecified α = 0.025&quot;
     )
   )
 )

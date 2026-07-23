@@ -1,0 +1,5 @@
+# Colchicine Pilot Trial — Statistical Results
+
+**Protocol:** STUDY-21-001175 (NCT05279690) | **Data cut:** `r format(Sys.Date(), "%d %B %Y")` (REDCap export `ProtocolNo2101175PRM_DATA_2026-05-18_2135.csv`)
+
+---

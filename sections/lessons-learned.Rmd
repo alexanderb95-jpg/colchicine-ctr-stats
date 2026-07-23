@@ -1,0 +1,7 @@
+## Lessons Learned
+
+- **Key outcome:** The prespecified primary CRP endpoint was not met (one-sided *p* = `r fmt_p(primary_p)` vs α = 0.025). With only `r evaluable_efficacy_n` of 15 planned evaluable patients, the trial was underpowered to confirm the observed `r fmt_num(primary_mean)`% mean CRP decline at the prespecified significance threshold.
+- **Key lesson:** Short-course low-dose colchicine was tolerable but yielded only a modest pharmacodynamic signal; future inflammation-modulation pilots in advanced solid tumors will likely need narrower disease selection, less restrictive eligibility, or larger cohorts to draw definitive conclusions.
+- **Key reason:** Accrual lagged because eligible patients were difficult to identify in routine oncology clinics (CRP greater than 5 mg/L plus organ-function requirements), `r screen_fail_n` of `r consented_n` consented patients (`r fmt_num(100 * screen_fail_n / consented_n, 1)`%) screen-failed before treatment (including 2 patient withdrawals, 1 organ dysfunction, and 1 acute clinical deterioration), and the adjuvant urothelial carcinoma cohort closed with zero enrollments.
+
+---

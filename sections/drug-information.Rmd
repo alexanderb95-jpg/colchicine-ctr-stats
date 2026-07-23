@@ -1,0 +1,25 @@
+## Drug Information
+
+```{r drug-info-table}
+drug_info <- tibble(
+  `Drug information` = c(
+    "Generic/working name", "Drug type", "Drug class", "Dose (Cohort 1 low)",
+    "Dose (Cohort 1 high)", "Dose (Cohort 2)", "Route", "Schedule"
+  ),
+  Details = c(
+    "Colchicine", "Anti-inflammatory alkaloid", "Microtubule polymerization inhibitor (indirect NLRP3 pathway modulation)",
+    "0.6 mg oral BID × 14 days", "0.6 mg oral TID × 14 days (not enrolled)",
+    "0.6 mg oral BID × 28 days with nivolumab 480 mg IV every 4 weeks (cohort closed)",
+    "Oral", "One cycle per protocol; missed doses not doubled"
+  )
+)
+drug_info %>%
+  kbl(
+    caption = tbl_cap("Drug information."),
+    col.names = c("Drug information", "Details"),
+    align = c("l", "l")
+  ) %>%
+  ctr_table_style()
+```
+
+---

@@ -1,0 +1,11 @@
+## Discussion
+
+This single-center pilot (STUDY-21-001175) evaluated whether short-course low-dose colchicine could suppress peripheral blood CRP in patients with advanced or recurrent solid tumors. The trial closed under planned accrual: Cohort 1 low dose enrolled `r enrolled_n` patients, the high-dose sequential arm never opened, and Cohort 2 (resected high-risk urothelial carcinoma planned for adjuvant nivolumab) closed before enrollment because of poor accrual.
+
+Among `r consented_n` consenting patients, `r screen_fail_n` (`r fmt_num(100 * screen_fail_n / consented_n, 1)`%) were screen failures before enrollment. `r evaluable_efficacy_n` of `r enrolled_n` enrolled patients were evaluable for the primary endpoint. The mean maximum CRP decline was `r fmt_num(primary_mean)`% (SD `r fmt_num(primary_sd)`%). The prespecified one-sided one-sample *t*-test yielded *p* = `r fmt_p(primary_p)`, which does not meet the protocol’s multiplicity-adjusted α = 0.025 threshold.
+
+With `r evaluable_efficacy_n` evaluable patients instead of the planned 15 per low-dose group, post-hoc power to detect the observed effect (Cohen’s d ≈ `r fmt_num(cohens_d_primary, 2)`) at α = 0.025 was approximately `r fmt_num(posthoc_power_pct, 0)`%.
+
+Colchicine 0.6 mg twice daily for 14 days was well tolerated with grade 1–2 treatment-related adverse events only. Exploratory RECIST and Kaplan–Meier analyses were underpowered. These findings provide preliminary biologic proof-of-concept for inflammatory modulation but do not support colchicine as an effective re-sensitization strategy.
+
+---
