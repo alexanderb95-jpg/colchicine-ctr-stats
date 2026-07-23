@@ -3,6 +3,6 @@
 **Protocol:** STUDY-21-001175 (IND 156493), version 3.0 (22 May 2023)  
 **Institution:** Icahn School of Medicine at Mount Sinai / Mount Sinai Hospital  
 **Principal investigator:** Deborah Y. Doroshow, MD, PhD  
-**Data cut:** `r format(Sys.Date(), "%d %B %Y")` (REDCap export `ProtocolNo2101175PRM_DATA_2026-05-18_2135.csv`)
+**Data cut:** `r format(Sys.Date(), "%d %B %Y")`
 
 ---

@@ -955,6 +955,7 @@ derive_crp_endpoint <- function(id, d_long) {
 crp_endpoint <- bind_rows(lapply(enrolled_ids, derive_crp_endpoint, crp_long))
 evaluable_efficacy_n <- nrow(crp_endpoint)
 evaluable_toxicity_n <- enrolled_n
+planned_evaluable_n <- 15L
 
 # Primary one-sided t-test (protocol: alpha = 0.025 for Cohort 1 low dose)
 primary_test <- if (evaluable_efficacy_n >= 2) {
@@ -977,6 +978,15 @@ cohens_d_primary <- if (evaluable_efficacy_n >= 2 && !is.na(primary_sd) && prima
 
 posthoc_power_pct <- if (evaluable_efficacy_n >= 2 && !is.na(cohens_d_primary)) {
   n <- evaluable_efficacy_n
+  ncp <- cohens_d_primary * sqrt(n)
+  t_crit <- qt(1 - 0.025, df = n - 1)
+  (1 - pt(t_crit, df = n - 1, ncp = ncp)) * 100
+} else {
+  NA_real_
+}
+
+posthoc_power_at_planned_n_pct <- if (!is.na(cohens_d_primary)) {
+  n <- planned_evaluable_n
   ncp <- cohens_d_primary * sqrt(n)
   t_crit <- qt(1 - 0.025, df = n - 1)
   (1 - pt(t_crit, df = n - 1, ncp = ncp)) * 100
@@ -1284,11 +1294,13 @@ primary_assess <- tibble(
     "Number of screen failures before enrollment",
     "Number evaluable for toxicity",
     "Number evaluable for primary efficacy (CRP)",
+    "Planned evaluable for primary efficacy (protocol)",
     "Endpoint definition",
     "Null hypothesis (H0)",
     "Alternative hypothesis (H1, one-sided)",
     "Statistical test",
     "Significance level (α)",
+    "Post-hoc statistical power (actual N, α = 0.025)",
     "Primary analysis result (Cohort 1 low dose)"
   ),
   Value = c(
@@ -1298,12 +1310,20 @@ primary_assess <- tibble(
     as.character(screen_fail_n),
     as.character(evaluable_toxicity_n),
     as.character(evaluable_efficacy_n),
-    "Peripheral blood CRP (mg/L) at protocol C1 visits; baseline = cycle 1 day 1 (or screening fallback if missing); minimum post-baseline value at C1D8/C1D15 used for maximum decline. Cycle 2 values excluded from primary endpoint per protocol treatment window.",
+    as.character(planned_evaluable_n),
+    "Peripheral blood CRP (mg/L) at cycle 1 visits; baseline = cycle 1 day 1 (or screening if missing); minimum post-baseline value at cycle 1 day 8 or day 15 used for maximum decline. Cycle 2 values excluded per protocol treatment window.",
     "Mean maximum percent CRP decline = 0 (colchicine does not reduce post-treatment CRP)",
     "Mean maximum percent CRP decline > 0",
     "One-sample one-sided t-test on patient-level maximum percent CRP declines",
     paste0(
       "α = 0.025 per protocol Section 12.4 (Bonferroni adjustment of overall α = 0.05 across two planned Cohort 1 primary tests: low-dose vs 0 and high-dose vs low-dose; high-dose arm did not enroll, so only the low-dose one-sample test was performed)"
+    ),
+    paste0(
+      "Approximately ", fmt_num(posthoc_power_pct, 0),
+      "% to detect the observed effect (standardized effect size d ≈ ",
+      fmt_num(cohens_d_primary, 2), ") with ", evaluable_efficacy_n,
+      " evaluable patients (protocol planned ", planned_evaluable_n,
+      "; design target 80% power at d = 0.80)"
     ),
     paste0(
       "Mean max decline ", fmt_num(primary_mean), "% (SD ", fmt_num(primary_sd), "%); ",
