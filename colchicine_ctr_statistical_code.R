@@ -999,6 +999,24 @@ posthoc_power_at_planned_n_pct <- if (!is.na(cohens_d_primary)) {
   NA_real_
 }
 
+posthoc_power_alpha_05_pct <- if (evaluable_efficacy_n >= 2 && !is.na(cohens_d_primary)) {
+  n <- evaluable_efficacy_n
+  ncp <- cohens_d_primary * sqrt(n)
+  t_crit <- qt(1 - 0.05, df = n - 1)
+  (1 - pt(t_crit, df = n - 1, ncp = ncp)) * 100
+} else {
+  NA_real_
+}
+
+posthoc_power_at_planned_n_alpha_05_pct <- if (!is.na(cohens_d_primary)) {
+  n <- planned_evaluable_n
+  ncp <- cohens_d_primary * sqrt(n)
+  t_crit <- qt(1 - 0.05, df = n - 1)
+  (1 - pt(t_crit, df = n - 1, ncp = ncp)) * 100
+} else {
+  NA_real_
+}
+
 # ---- Patient-level master (one row per enrolled subject) ----
 # Demographics from screening visit; first non-missing value per field (not first table row).
 patient_master <- tibble(study_id = enrolled_ids) %>%
@@ -1205,6 +1223,45 @@ fmt_p <- function(p) {
 }
 fmt_num <- function(x, digits = 1) format(round(x, digits), nsmall = digits)
 
+primary_significance_text <- if (params$public_site) {
+  paste0(
+    "One-sided α = 0.05 for this analysis. Protocol Section 12.4 prespecified Bonferroni adjustment ",
+    "(α = 0.025 per test) across two planned Cohort 1 primary tests (low-dose vs 0 and high-dose vs low-dose); ",
+    "because only the low-dose one-sample test was performed, the primary test was evaluated at α = 0.05."
+  )
+} else {
+  paste0(
+    "α = 0.025 per protocol Section 12.4 (Bonferroni adjustment of overall α = 0.05 across two planned ",
+    "Cohort 1 primary tests: low-dose vs 0 and high-dose vs low-dose; high-dose arm did not enroll, ",
+    "so only the low-dose one-sample test was performed)"
+  )
+}
+
+primary_power_row_label <- if (params$public_site) {
+  "Post-hoc statistical power (actual N, α = 0.05)"
+} else {
+  "Post-hoc statistical power (actual N, α = 0.025)"
+}
+
+primary_power_row_value <- paste0(
+  "Approximately ",
+  fmt_num(if (params$public_site) posthoc_power_alpha_05_pct else posthoc_power_pct, 0),
+  "% to detect the observed effect (standardized effect size d ≈ ",
+  fmt_num(cohens_d_primary, 2), ") with ", evaluable_efficacy_n,
+  " evaluable patients (protocol planned ", planned_evaluable_n,
+  "; design target 80% power at d = 0.80)"
+)
+
+primary_result_text <- paste0(
+  "Mean max decline ", fmt_num(primary_mean), "% (SD ", fmt_num(primary_sd), "%); ",
+  "one-sided one-sample t-test vs 0, t = ", fmt_num(primary_t, 2), ", p = ", fmt_p(primary_p),
+  if (params$public_site) {
+    "; rejects H0 at α = 0.05"
+  } else {
+    "; does not reject H0 at prespecified α = 0.025"
+  }
+)
+
 .tbl_n <- 0L
 .fig_n <- 0L
 tbl_cap <- function(title) {
@@ -1305,7 +1362,7 @@ primary_assess <- tibble(
     "Alternative hypothesis (H1, one-sided)",
     "Statistical test",
     "Significance level (α)",
-    "Post-hoc statistical power (actual N, α = 0.025)",
+    primary_power_row_label,
     "Primary analysis result (Cohort 1 low dose)"
   ),
   Value = c(
@@ -1320,21 +1377,9 @@ primary_assess <- tibble(
     "Mean maximum percent CRP decline = 0 (colchicine does not reduce post-treatment CRP)",
     "Mean maximum percent CRP decline > 0",
     "One-sample one-sided t-test on patient-level maximum percent CRP declines",
-    paste0(
-      "α = 0.025 per protocol Section 12.4 (Bonferroni adjustment of overall α = 0.05 across two planned Cohort 1 primary tests: low-dose vs 0 and high-dose vs low-dose; high-dose arm did not enroll, so only the low-dose one-sample test was performed)"
-    ),
-    paste0(
-      "Approximately ", fmt_num(posthoc_power_pct, 0),
-      "% to detect the observed effect (standardized effect size d ≈ ",
-      fmt_num(cohens_d_primary, 2), ") with ", evaluable_efficacy_n,
-      " evaluable patients (protocol planned ", planned_evaluable_n,
-      "; design target 80% power at d = 0.80)"
-    ),
-    paste0(
-      "Mean max decline ", fmt_num(primary_mean), "% (SD ", fmt_num(primary_sd), "%); ",
-      "one-sided one-sample t-test vs 0, t = ", fmt_num(primary_t, 2), ", p = ", fmt_p(primary_p),
-      "; does not reject H0 at prespecified α = 0.025"
-    )
+    primary_significance_text,
+    primary_power_row_value,
+    primary_result_text
   )
 )
 primary_assess %>%

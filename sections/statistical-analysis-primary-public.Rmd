@@ -1,0 +1,9 @@
+The primary endpoint was maximum percent decline in peripheral blood CRP from cycle 1 day 1 to the lowest on-treatment value during post-baseline cycle 1 visits (cycle 1 day 8 or day 15). We tested the prespecified null hypothesis H0: mean maximum CRP decline = 0 against the one-sided alternative H1: mean decline > 0 using a one-sample *t*-test.
+
+[Protocol `r protocol_id`, version `r protocol_version`](`r nct_url`) Section 12.4 prespecified Bonferroni adjustment of overall type I error at 0.05 across two planned Cohort 1 primary tests (low-dose vs 0 and high-dose vs low-dose), yielding α = 0.025 for each test. Because the high-dose sequential arm did not enroll, only the low-dose one-sample test was performed; for this completed analysis we applied one-sided α = 0.05 rather than the Bonferroni-adjusted α = 0.025.
+
+The observed mean decline was `r fmt_num(primary_mean)`% (SD `r fmt_num(primary_sd)`%); one-sided *p* = `r fmt_p(primary_p)`, which rejects H0 at α = 0.05.
+
+### Sample size and power
+
+The protocol planned `r planned_evaluable_n` evaluable patients in the low-dose cohort (80% power to detect a standardized effect size of 0.80 at α = 0.025). `r evaluable_efficacy_n` evaluable patients were analyzed. Post-hoc power to detect the observed effect (standardized effect size d ≈ `r fmt_num(cohens_d_primary, 2)`) at α = 0.05 was approximately `r fmt_num(posthoc_power_alpha_05_pct, 0)`%. At the full planned sample size of 15 with the same observed effect, post-hoc power at α = 0.05 would have been approximately `r fmt_num(posthoc_power_at_planned_n_alpha_05_pct, 0)`%.
